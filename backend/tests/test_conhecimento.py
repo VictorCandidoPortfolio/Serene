@@ -1,7 +1,7 @@
 """Fase 1: conhecimento olfativo (famílias, características, doçura, marca de exemplo)."""
 
 import pytest
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 
 from app.models.knowledge import KnowledgeDescriptor, KnowledgeNote
 from app.seed import popular
@@ -91,7 +91,8 @@ def test_docura_em_tres_niveis_nas_notas_e_check_no_banco(client, h, db):
     assert niveis <= {"baixa", "media", "alta", None} and niveis - {None}
     nota = db.query(KnowledgeNote).first()
     nota.docura_nivel_ref = "enjoativa"
-    with pytest.raises(IntegrityError):
+    # SQLite acusa IntegrityError; o MySQL, OperationalError (erro 3819).
+    with pytest.raises((IntegrityError, OperationalError)):
         db.commit()
     db.rollback()
 
