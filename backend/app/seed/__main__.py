@@ -10,7 +10,7 @@ def main() -> None:
         contagem = popular(db)
     for tabela, qtd in contagem.items():
         print(f"{tabela:36} {qtd:>3} registro(s)")
-    print("Seed concluído (dados ILUSTRATIVOS — ver app/seed/data.py).")
+    print("Seed concluído. Notas, relações, mapas e números do motor são EXEMPLO (marcados no banco); ver app/seed/data.py.")
 
 
 if __name__ == "__main__":

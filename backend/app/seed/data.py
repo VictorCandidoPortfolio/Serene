@@ -1,9 +1,19 @@
-"""Dados ILUSTRATIVOS da base de conhecimento.
+"""Base de conhecimento do SÉRENÉ: estrutura definida + conteúdo de EXEMPLO.
 
-ATENÇÃO: estes valores existem só para validar o motor ponta a ponta nesta
-fase. NÃO são a base oficial do SÉRENÉ (34 notas, 28 relações, 14 mapas e
-todas as regras virão à parte). Por isso toda nota traz `fonte` marcando o
-caráter ilustrativo.
+Dois tipos de conteúdo convivem aqui, e a diferença é gravada no banco
+(coluna `ilustrativo`) e exibida na interface:
+
+- ESTRUTURA definida pela cliente: as 14 famílias, "Floral Branco" como
+  subfamília de Floral, as 9 características sensoriais, os níveis da
+  pirâmide, e os nomes dos territórios e dos públicos. `ilustrativo=False`.
+- EXEMPLO (`ilustrativo=True`): notas, relações entre famílias, mapas e os
+  números do motor (vetores, pesos, limites). Existem só para exercitar o
+  motor e NÃO são a base oficial do SÉRENÉ (34 notas, 28 relações, 14 mapas
+  e todas as regras virão à parte). Quando a base oficial entrar, basta
+  substituir estas linhas: a marca some junto com o exemplo.
+
+Uma linha de exemplo nunca é apresentada como validada e seus números nunca
+são copiados para o repertório de uma aluna.
 
 Formato de `valor` por tipo de regra (contrato lido pelo motor):
 - territorio            {"nome": str, "descricao_curta": str}
@@ -17,28 +27,49 @@ Formato de `valor` por tipo de regra (contrato lido pelo motor):
                          dos módulos em app/engine/.
 """
 
-FONTE_ILUSTRATIVA = "ILUSTRATIVO — substituir pela base oficial SÉRENÉ"
+FONTE_ILUSTRATIVA = "EXEMPLO — não validado; será substituído pela base oficial SÉRENÉ"
+
+# Tipos de regra cujo CONTEÚDO é definido pela cliente (não é exemplo): só o
+# nome e a descrição dos territórios. Todo o resto é calibração de exemplo.
+TIPOS_REGRA_DA_CLIENTE = ("territorio",)
 
 FAMILIAS = [
     # (slug, nome, parent_slug, cor, ordem, descricao)
     ("citrico", "Cítrico", None, "#F2C14E", 1, "Notas frescas, luminosas e voláteis de frutas cítricas."),
-    ("aromatico", "Aromático", None, "#7FA36B", 2, "Ervas e folhas aromáticas; frescor verde e limpo."),
-    ("floral", "Floral", None, "#E8A0BF", 3, "Flores em geral; o coração clássico da perfumaria."),
-    ("floral_branco", "Floral Branco", "floral", "#F5E6E8", 4, "Flores brancas cremosas e envolventes."),
-    ("amadeirado", "Amadeirado", None, "#8B5E3C", 5, "Madeiras secas ou cremosas; estrutura e fundo."),
-    ("ambarado", "Ambarado", None, "#C8742C", 6, "Resinas e acordes quentes, doces e envolventes."),
+    ("floral", "Floral", None, "#E8A0BF", 2, "Flores em geral; o coração clássico da perfumaria."),
+    ("floral_branco", "Floral Branco", "floral", "#F5E6E8", 3, "Subfamília de Floral: flores brancas cremosas e envolventes."),
+    ("amadeirado", "Amadeirado", None, "#8B5E3C", 4, "Madeiras secas ou cremosas; estrutura e fundo."),
+    ("ambarado", "Ambarado", None, "#C8742C", 5, "Resinas e acordes quentes, doces e envolventes."),
+    ("aromatico", "Aromático", None, "#7FA36B", 6, "Ervas e folhas aromáticas; frescor verde e limpo."),
+    ("frutado", "Frutado", None, "#E4572E", 7, "Frutas, exceto as cítricas; suculento e adocicado."),
+    ("verde", "Verde", None, "#4F9D69", 8, "Folhas, caules e grama cortada; frescor vegetal."),
+    ("aquatico_marinho", "Aquático/Marinho", None, "#4FA3C7", 9, "Brisa do mar, água e ozônio; sensação de ar livre e umidade."),
+    ("gourmand", "Gourmand", None, "#B5651D", 10, "Notas comestíveis: doces, cremosas e de confeitaria."),
+    ("especiado", "Especiado", None, "#A63D2F", 11, "Especiarias: calor picante, seco ou adocicado."),
+    ("chipre", "Chipre", None, "#6B705C", 12, "Estrutura clássica de contraste entre frescor de saída e fundo musgoso e amadeirado."),
+    ("almiscarado", "Almiscarado", None, "#D9C7B8", 13, "Almíscar e notas de pele limpa; macias e envolventes."),
+    ("fougere", "Fougère", None, "#5C7457", 14, "Estrutura aromática e amadeirada associada a lavanda, musgo e cumarina."),
+    ("couro", "Couro", None, "#3E2C23", 15, "Notas de couro, seco, defumado ou macio."),
 ]
 
+# Características sensoriais: entidade distinta das famílias.
+# (nome, categoria) — `categoria` só agrupa na exibição.
 DESCRITORES = [
+    ("doce", "gosto"),
+    ("seco", "gosto"),
+    ("fresco", "temperatura"),
     ("cremoso", "textura"),
-    ("luminoso", "temperatura"),
-    ("resinoso", "textura"),
+    ("atalcado", "textura"),
+    ("limpo", "impressão"),
+    ("intenso", "impressão"),
+    ("balsâmico", "impressão"),
+    ("esfumaçado", "impressão"),
 ]
 
 FUNCOES = [
-    ("saida", "Saída", "Primeira impressão; notas voláteis que evaporam rápido.", 1),
+    ("saida", "Saída", "Primeira impressão; costuma reunir notas voláteis, que evaporam mais rápido.", 1),
     ("coracao", "Coração", "Identidade da fragrância; aparece depois da saída.", 2),
-    ("fundo", "Fundo", "Base e fixação; o que permanece por mais tempo.", 3),
+    ("fundo", "Fundo", "Base e fixação; costuma reunir o que permanece por mais tempo.", 3),
 ]
 
 NOTAS = [
@@ -47,35 +78,35 @@ NOTAS = [
         "familia": "citrico", "tipo_referencia": "simples",
         "papel_tipico": {"saida": 0.9, "coracao": 0.1, "fundo": 0.0},
         "v": (2.0, 1.5, 3.0, 6.0), "v6": 1.0, "confianca_referencia": "media",
-        "descritores": ["luminoso"],
+        "descritores": ["fresco"], "docura": "baixa",
     },
     {
         "nome": "Lavanda", "sinonimos": ["Lavender", "Alfazema"],
         "familia": "aromatico", "tipo_referencia": "simples",
         "papel_tipico": {"saida": 0.5, "coracao": 0.5, "fundo": 0.0},
         "v": (3.0, 3.0, 3.0, 5.0), "v6": 3.0, "confianca_referencia": "media",
-        "descritores": [],
+        "descritores": ["limpo"], "docura": "baixa",
     },
     {
         "nome": "Jasmim", "sinonimos": ["Jasmine", "Jasmin"],
         "familia": "floral_branco", "tipo_referencia": "simples",
         "papel_tipico": {"saida": 0.1, "coracao": 0.8, "fundo": 0.1},
         "v": (6.0, 5.0, 6.0, 7.0), "v6": 9.0, "confianca_referencia": "media",
-        "descritores": ["cremoso"],
+        "descritores": ["cremoso"], "docura": "media",
     },
     {
         "nome": "Cedro", "sinonimos": ["Cedarwood", "Cedro Atlas"],
         "familia": "amadeirado", "tipo_referencia": "simples",
         "papel_tipico": {"saida": 0.0, "coracao": 0.2, "fundo": 0.8},
         "v": (5.0, 8.0, 2.0, 5.0), "v6": 0.0, "confianca_referencia": "media",
-        "descritores": [],
+        "descritores": ["seco"], "docura": "baixa",
     },
     {
         "nome": "Âmbar", "sinonimos": ["Amber", "Ambar"],
         "familia": "ambarado", "tipo_referencia": "composta",
         "papel_tipico": {"saida": 0.0, "coracao": 0.1, "fundo": 0.9},
         "v": (8.5, 9.0, 7.0, 7.0), "v6": 1.0, "confianca_referencia": "baixa",
-        "descritores": ["resinoso"],
+        "descritores": ["balsâmico", "doce"], "docura": "alta",
         "observacoes": "Acorde comercial: composição varia por fornecedor.",
     },
 ]
@@ -127,6 +158,8 @@ REGRAS = [
      "Território de sofisticação e sobriedade."),
     ("territorio", "magnetismo", {"nome": "Magnetismo", "descricao_curta": "Intenso, quente, envolvente."},
      "Território de presença e sedução."),
+    ("territorio", "sensualidade", {"nome": "Sensualidade", "descricao_curta": "Envolvente, quente, sedutor."},
+     "Território de sedução e presença na pele."),
     ("correlacao_territorio", "acolhimento", {"vetor": {"v1": 7.0, "v2": 6.0, "v3": 6.5}, "peso": 1.0},
      "Acolhimento puxa para quente, persistente e levemente doce."),
     ("correlacao_territorio", "delicadeza", {"vetor": {"v1": 5.0, "v3": 5.5, "v4": 3.5}, "peso": 1.0},
@@ -143,6 +176,8 @@ REGRAS = [
      "Renovação: fresca, leve e presente."),
     ("correlacao_territorio", "elegancia", {"vetor": {"v2": 6.5, "v3": 3.5, "v5": 7.0}, "peso": 1.0},
      "Elegância: persistente, seca e complexa."),
+    ("correlacao_territorio", "sensualidade", {"vetor": {"v1": 7.0, "v2": 7.0, "v4": 6.5}, "peso": 1.0},
+     "Sensualidade: quente, persistente e presente."),
     ("correlacao_territorio", "magnetismo", {"vetor": {"v1": 7.5, "v2": 8.0, "v4": 7.5}, "peso": 1.0},
      "Magnetismo: quente, persistente e marcante."),
     # ------------------------------------------------------------- emoções

@@ -36,8 +36,8 @@ app/
   services/      regras de negócio; motor.py liga a base de conhecimento ao motor
   engine/        motor olfativo — funções PURAS (vectors, compatibility, movement, gaps, recommendation, reconhecimento)
   routers/       HTTP fino: valida → service → resposta
-  seed/          dados ILUSTRATIVOS da base de conhecimento (idempotente)
-alembic/versions/  0001 conhecimento · 0002 repertório · 0003 coleções
+  seed/          base de conhecimento: estrutura da cliente + conteúdo de EXEMPLO marcado (idempotente)
+alembic/versions/  0001–0009 (conhecimento, repertório, coleções, conta, marca de exemplo)
 tests/           test_auth · test_isolamento · test_engine · test_fluxo
 ```
 
@@ -103,14 +103,17 @@ primeiro cadastro.
 ### 3. Migrations e seed
 
 ```bash
-alembic upgrade head      # cria as tabelas e aplica as 8 migrations
+alembic upgrade head      # cria as tabelas e aplica as 9 migrations
 alembic check             # confirma que models e migrations estão em sincronia
 python -m app.seed        # popula knowledge_* (pode rodar de novo, é idempotente)
 ```
 
-O seed tem **dados ilustrativos** (6 famílias, 5 notas, 5 relações, 3 mapas e
-38 regras, incluindo os 9 territórios da descrição do produto e 3 públicos), suficientes para exercitar o
-motor. A base oficial vai substituir [app/seed/data.py](app/seed/data.py).
+O seed mistura dois tipos de conteúdo, e a diferença fica gravada no banco (coluna `ilustrativo`) e aparece na interface:
+
+- **Estrutura da cliente** (`ilustrativo = false`): as 14 famílias, "Floral Branco" como subfamília de Floral, as 9 características sensoriais, os 3 níveis da pirâmide e os nomes dos 10 territórios.
+- **Exemplo** (`ilustrativo = true`): 5 notas, 5 relações, 3 mapas e os números do motor (vetores, pesos, limites, públicos). Existem só para exercitar o motor. **Nunca são apresentados como validados**, e os números de uma nota de exemplo não são copiados para a essência da aluna (só a classificação é sugerida).
+
+A base oficial vai substituir essas linhas em [app/seed/data.py](app/seed/data.py); a marca some junto com o exemplo.
 
 ### 4. API
 
@@ -199,7 +202,7 @@ Tudo exige o token; a lógica fica em [app/services/conta_service.py](app/servic
 | Caminhos de uma referência | `GET /referencias/{id}/caminhos` | `engine/referencias.py` |
 | Evolução (motivo de cada versão) | `POST /criacoes/{id}/acordes` (`motivo`) | `models/repertorio.py::Acorde.motivo` |
 | Identidade geral da coleção | `GET /colecoes` (`identidade_geral`) | `services/outros_service.py::ColecoesService.identidade` |
-| 9 territórios, 3 públicos | `GET /conhecimento/territorios`, `/publicos` | `seed/data.py` (dados ilustrativos) |
+| 10 territórios, 3 públicos | `GET /conhecimento/territorios`, `/publicos` | `seed/data.py` (nomes da cliente; vetores de exemplo) |
 
 Testes: [tests/test_funcionalidades.py](tests/test_funcionalidades.py), que também varre o OpenAPI e
 falha se alguma rota nova ficar sem exigir login.

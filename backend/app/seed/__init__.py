@@ -50,13 +50,18 @@ def popular(db: Session) -> dict[str, int]:
     for slug, nome, _parent, cor, ordem, descricao in data.FAMILIAS:
         familias[slug] = _upsert(
             db, KnowledgeFamily, {"slug": slug},
-            {"nome": nome, "cor": cor, "ordem": ordem, "descricao": descricao},
+            {"nome": nome, "cor": cor, "ordem": ordem, "descricao": descricao, "ilustrativo": False},
         )
     for slug, _nome, parent, *_ in data.FAMILIAS:
         familias[slug].parent_id = familias[parent].id if parent else None
 
     for nome, categoria in data.DESCRITORES:
-        _upsert(db, KnowledgeDescriptor, {"nome": nome}, {"categoria": categoria})
+        _upsert(db, KnowledgeDescriptor, {"nome": nome}, {"categoria": categoria, "ativo": True})
+    # Termos antigos fora do vocabulário atual são desativados, nunca apagados.
+    vigentes = {nome for nome, _ in data.DESCRITORES}
+    for antigo in db.scalars(select(KnowledgeDescriptor)):
+        if antigo.nome not in vigentes:
+            antigo.ativo = False
 
     for slug, nome, descricao, ordem in data.FUNCOES:
         _upsert(db, KnowledgeCompositionFunction, {"slug": slug},
@@ -73,10 +78,12 @@ def popular(db: Session) -> dict[str, int]:
                 "papel_tipico": nota["papel_tipico"],
                 "v1_ref": v1, "v2_ref": v2, "v3_ref": v3, "v4_ref": v4,
                 "v6_ref": nota.get("v6"),
+                "docura_nivel_ref": nota.get("docura"),
                 "confianca_referencia": nota["confianca_referencia"],
                 "fonte": data.FONTE_ILUSTRATIVA,
                 "descritores": nota["descritores"],
                 "observacoes": nota.get("observacoes"),
+                "ilustrativo": True,
             },
         )
 
@@ -84,7 +91,7 @@ def popular(db: Session) -> dict[str, int]:
         _upsert(
             db, KnowledgeFamilyRelation,
             {"family_a_id": familias[a].id, "family_b_id": familias[b].id},
-            {"tipo_relacao": tipo, "peso": peso, "descricao": descricao},
+            {"tipo_relacao": tipo, "peso": peso, "descricao": descricao, "ilustrativo": True},
         )
 
     for mapa in data.MAPAS:
@@ -96,12 +103,14 @@ def popular(db: Session) -> dict[str, int]:
                 "conteudo": mapa["conteudo"],
                 "relacoes": mapa["relacoes"],
                 "ordem": mapa["ordem"],
+                "ilustrativo": True,
             },
         )
 
     for tipo, chave, valor, descricao in data.REGRAS:
         _upsert(db, KnowledgeEngineRule, {"tipo": tipo, "chave": chave},
-                {"valor": valor, "descricao": descricao, "ativo": True})
+                {"valor": valor, "descricao": descricao, "ativo": True,
+                 "ilustrativo": tipo not in data.TIPOS_REGRA_DA_CLIENTE})
 
     db.commit()
     return {

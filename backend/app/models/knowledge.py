@@ -40,6 +40,7 @@ from app.db.base import Base
 TIPOS_REFERENCIA = ("simples", "composta", "desconhecida")
 NIVEIS_CONFIANCA = ("alta", "media", "baixa")
 TIPOS_RELACAO = ("classico", "complementar", "atencao", "contraste")
+NIVEIS_DOCURA = ("baixa", "media", "alta")
 CATEGORIAS_MAPA = ("familia", "piramide", "eixo")
 # Os TIPOS de regra são fixos (o motor precisa saber o que consultar), mas as
 # REGRAS em si — quais territórios, públicos, movimentos existem — são linhas
@@ -84,6 +85,10 @@ class KnowledgeFamily(Base):
     )
     cor: Mapped[str | None] = mapped_column(String(20))
     ordem: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # True = conteúdo de EXEMPLO, ainda não validado pela SÉRENÉ. A API devolve
+    # a marca e a interface a exibe; o motor nunca copia números de uma linha
+    # assim para o repertório da aluna (ver services/essencias_service.py).
+    ilustrativo: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
     parent: Mapped["KnowledgeFamily | None"] = relationship(
         remote_side=[id], back_populates="subfamilias"
@@ -92,10 +97,12 @@ class KnowledgeFamily(Base):
 
 
 class KnowledgeDescriptor(Base):
-    """Vocabulário controlado de descritores (ex.: "cremoso", "verde").
+    """Característica sensorial (ex.: "cremoso", "doce", "balsâmico").
 
+    É uma entidade DISTINTA da família olfativa: a família diz a que "grupo"
+    uma essência pertence; a característica descreve como ela é percebida.
     `categoria` só organiza a exibição — o motor nunca calcula nada a partir
-    dela.
+    dela. `ativo=False` retira o termo do vocabulário sem apagar a linha.
     """
 
     __tablename__ = "knowledge_descriptors"
@@ -103,10 +110,15 @@ class KnowledgeDescriptor(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     nome: Mapped[str] = mapped_column(String(80), unique=True)
     categoria: Mapped[str | None] = mapped_column(String(80))
+    ativo: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
 
 
 class KnowledgeCompositionFunction(Base):
-    """Função na pirâmide olfativa: saída, coração, fundo."""
+    """Nível da pirâmide olfativa: saída, coração, fundo.
+
+    A pirâmide é um modelo DESCRITIVO, não uma regra: uma matéria-prima pode
+    atuar em mais de um nível ou não ter nível definido (ver `papel_tipico`).
+    """
 
     __tablename__ = "knowledge_composition_functions"
 
@@ -133,6 +145,10 @@ class KnowledgeNote(Base):
         CheckConstraint(
             in_check("confianca_referencia", NIVEIS_CONFIANCA), name="confianca_referencia"
         ),
+        CheckConstraint(
+            "docura_nivel_ref IS NULL OR " + in_check("docura_nivel_ref", NIVEIS_DOCURA),
+            name="docura_nivel_ref",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -158,6 +174,8 @@ class KnowledgeNote(Base):
     v3_ref: Mapped[float | None] = mapped_column(Float)
     v4_ref: Mapped[float | None] = mapped_column(Float)
     v6_ref: Mapped[float | None] = mapped_column(Float)
+    # Intensidade da doçura em três níveis (baixa | media | alta); None = não se sabe.
+    docura_nivel_ref: Mapped[str | None] = mapped_column(String(10))
     # Se "baixa", o sistema avisa a aluna em vez de afirmar com certeza.
     confianca_referencia: Mapped[str] = mapped_column(
         String(10), default="baixa", server_default="baixa"
@@ -165,6 +183,10 @@ class KnowledgeNote(Base):
     fonte: Mapped[str | None] = mapped_column(Text)
     descritores: Mapped[list[str]] = mapped_column(JSON, default=list)
     observacoes: Mapped[str | None] = mapped_column(Text)
+    # True = conteúdo de EXEMPLO, ainda não validado pela SÉRENÉ. A API devolve
+    # a marca e a interface a exibe; o motor nunca copia números de uma linha
+    # assim para o repertório da aluna (ver services/essencias_service.py).
+    ilustrativo: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
     family: Mapped[KnowledgeFamily | None] = relationship()
 
@@ -193,6 +215,10 @@ class KnowledgeFamilyRelation(Base):
     # Intensidade da relação, 0..1 — multiplica o peso do tipo no score.
     peso: Mapped[float] = mapped_column(Float, default=1.0, server_default="1")
     descricao: Mapped[str | None] = mapped_column(Text)
+    # True = conteúdo de EXEMPLO, ainda não validado pela SÉRENÉ. A API devolve
+    # a marca e a interface a exibe; o motor nunca copia números de uma linha
+    # assim para o repertório da aluna (ver services/essencias_service.py).
+    ilustrativo: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
     family_a: Mapped[KnowledgeFamily] = relationship(foreign_keys=[family_a_id])
     family_b: Mapped[KnowledgeFamily] = relationship(foreign_keys=[family_b_id])
@@ -219,6 +245,10 @@ class KnowledgeMap(Base):
     conteudo: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     relacoes: Mapped[Any | None] = mapped_column(JSON)
     ordem: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # True = conteúdo de EXEMPLO, ainda não validado pela SÉRENÉ. A API devolve
+    # a marca e a interface a exibe; o motor nunca copia números de uma linha
+    # assim para o repertório da aluna (ver services/essencias_service.py).
+    ilustrativo: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
 
 class KnowledgeEngineRule(Base):
@@ -246,3 +276,7 @@ class KnowledgeEngineRule(Base):
     descricao: Mapped[str | None] = mapped_column(Text)
     # Desativar em vez de apagar preserva o histórico de calibração.
     ativo: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
+    # True = conteúdo de EXEMPLO, ainda não validado pela SÉRENÉ. A API devolve
+    # a marca e a interface a exibe; o motor nunca copia números de uma linha
+    # assim para o repertório da aluna (ver services/essencias_service.py).
+    ilustrativo: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")

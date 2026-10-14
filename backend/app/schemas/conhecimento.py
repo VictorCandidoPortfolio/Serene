@@ -15,10 +15,11 @@ class FamiliaOut(ORMModel):
     parent_id: int | None
     cor: str | None
     ordem: int
+    ilustrativo: bool = False
 
 
 class DescritorOut(ORMModel):
-    """Descritor sensorial."""
+    """Característica sensorial (distinta da família olfativa)."""
 
     id: int
     nome: str
@@ -49,10 +50,12 @@ class NotaOut(ORMModel):
     v3_ref: float | None
     v4_ref: float | None
     v6_ref: float | None = None
+    docura_nivel_ref: str | None = None
     confianca_referencia: str
     fonte: str | None
     descritores: list[str] = []
     observacoes: str | None
+    ilustrativo: bool = False
 
 
 class RelacaoOut(ORMModel):
@@ -64,6 +67,7 @@ class RelacaoOut(ORMModel):
     tipo_relacao: str
     peso: float
     descricao: str | None
+    ilustrativo: bool = False
 
 
 class MapaOut(ORMModel):
@@ -76,6 +80,7 @@ class MapaOut(ORMModel):
     conteudo: dict[str, Any]
     relacoes: Any | None
     ordem: int
+    ilustrativo: bool = False
 
 
 class RegraOut(ORMModel):
@@ -87,3 +92,4 @@ class RegraOut(ORMModel):
     valor: Any
     descricao: str | None
     ativo: bool
+    ilustrativo: bool = False

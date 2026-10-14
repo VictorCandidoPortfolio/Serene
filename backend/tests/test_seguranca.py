@@ -309,18 +309,18 @@ def test_senha_gigante_nao_derruba_o_login():
 
 
 # --------------------------------------------- bugs de referência (essências)
-def test_aplicar_referencia_na_edicao_nao_apaga_correcao_da_aluna(client, nova_usuaria):
+def test_aplicar_referencia_na_edicao_nao_apaga_correcao_da_aluna(client, nova_usuaria, nota_validada):
     h = nova_usuaria("r@exemplo.com")
-    e = client.post("/essencias", json={"nome": "Cedro", "knowledge_note_id": 4,
+    e = client.post("/essencias", json={"nome": "Cedro", "knowledge_note_id": nota_validada,
                                         "aplicar_referencia": True}, headers=h).json()
     client.put(f"/essencias/{e['id']}", json={"v2": 9}, headers=h)  # correção da aluna
     r = client.put(f"/essencias/{e['id']}", json={"aplicar_referencia": True}, headers=h).json()
     assert r["v2"] == 9 and r["editado_da_referencia"] is True
 
 
-def test_mesmo_valor_da_referencia_nao_marca_editado(client, nova_usuaria):
+def test_mesmo_valor_da_referencia_nao_marca_editado(client, nova_usuaria, nota_validada):
     h = nova_usuaria("s@exemplo.com")
-    e = client.post("/essencias", json={"nome": "Cedro", "knowledge_note_id": 4,
+    e = client.post("/essencias", json={"nome": "Cedro", "knowledge_note_id": nota_validada,
                                         "aplicar_referencia": True}, headers=h).json()
     r = client.put(f"/essencias/{e['id']}", json={"v2": e["v2"]}, headers=h).json()
     assert r["editado_da_referencia"] is False

@@ -13,7 +13,7 @@ import Icon from '../components/Icon';
 import { useConfirmar } from '../components/Confirmar';
 import Sheet from '../components/Sheet';
 import { Cabecalho } from '../components/Layout';
-import { Avatar, Campo, Carregando, Eixos, Erro, Linhas, Pill, Vazio } from '../components/ui';
+import { Avatar, Campo, Carregando, Eixos, Erro, Exemplo, Linhas, Pill, Vazio } from '../components/ui';
 
 const ABAS = [
   { chave: 'repertorio', nome: 'Repertório' },
@@ -322,7 +322,9 @@ function CartaoSugestao({ sugestao: s, ativo, onClick }) {
         <small>
           {[s.familia, s.subfamilia, camadaDominante(s.papel)].filter(Boolean).join(' · ')}
         </small>
+        {s.ilustrativa && s.avisos?.length > 0 && <small className="texto-suave">{s.avisos[0]}</small>}
       </span>
+      {s.ilustrativa && <Exemplo />}
       {ativo ? <Icon name="check" /> : <Pill>{s.correspondencia}</Pill>}
     </Tag>
   );

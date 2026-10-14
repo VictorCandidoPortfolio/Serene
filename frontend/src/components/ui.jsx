@@ -46,6 +46,11 @@ export function Pill({ children, tom = 'lilac' }) {
   return <span className={`pill pill-${tom}`}>{children}</span>;
 }
 
+/** Marca de conteúdo de EXEMPLO: ainda não validado pela SÉRENÉ. */
+export function Exemplo() {
+  return <Pill tom="amarelo">Exemplo</Pill>;
+}
+
 /** Linhas "rótulo ........ valor" separadas por fio, como a lista "Items". */
 export function Linhas({ itens }) {
   return (

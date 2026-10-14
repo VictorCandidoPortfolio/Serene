@@ -37,8 +37,17 @@ CAMPOS_DA_REFERENCIA = (
 )
 
 
+# Campos numéricos de uma nota: vetores e papel na pirâmide. Numa nota de
+# EXEMPLO (`ilustrativo`) eles são calibração de demonstração, não medida, e
+# por isso nunca são oferecidos nem copiados para o repertório da aluna.
+CAMPOS_NUMERICOS_DA_REFERENCIA = ("papel", "v1", "v2", "v3", "v4", "v6")
+
+
 def valores_da_referencia(nota: KnowledgeNote) -> dict[str, Any]:
     """Classificação sugerida por uma nota de conhecimento.
+
+    Nota de exemplo (`nota.ilustrativo`): só a classificação (família,
+    subfamília, tipo, características) é sugerida; os números ficam None.
 
     Se a família da nota é uma subfamília, `familia` recebe a mãe e
     `subfamilia` a própria. Valores ausentes na nota ficam None — e continuam
@@ -50,7 +59,7 @@ def valores_da_referencia(nota: KnowledgeNote) -> dict[str, Any]:
             familia, subfamilia = nota.family.parent.nome, nota.family.nome
         else:
             familia = nota.family.nome
-    return {
+    valores = {
         "familia": familia,
         "subfamilia": subfamilia,
         "tipo": nota.tipo_referencia,
@@ -62,6 +71,10 @@ def valores_da_referencia(nota: KnowledgeNote) -> dict[str, Any]:
         "v6": nota.v6_ref,
         "descritores": list(nota.descritores or []),
     }
+    if nota.ilustrativo:
+        for campo in CAMPOS_NUMERICOS_DA_REFERENCIA:
+            valores[campo] = None
+    return valores
 
 
 def difere_da_referencia(valores: dict[str, Any], nota: KnowledgeNote) -> bool:
@@ -80,6 +93,11 @@ def difere_da_referencia(valores: dict[str, Any], nota: KnowledgeNote) -> bool:
 def _avisos_referencia(nota: KnowledgeNote) -> list[str]:
     """Avisos honestos sobre a qualidade de uma referência."""
     avisos = []
+    if nota.ilustrativo:
+        avisos.append(
+            "Nota de EXEMPLO, ainda não validada: só a classificação é sugerida. "
+            "Os valores (frescor, doçura etc.) ficam por sua conta."
+        )
     if nota.confianca_referencia == "baixa":
         avisos.append("Referência de baixa confiança: confira antes de aceitar.")
     if nota.tipo_referencia == "composta":
@@ -88,7 +106,7 @@ def _avisos_referencia(nota: KnowledgeNote) -> list[str]:
             "fornecedor não é conhecida."
         )
     faltando = [e for e in ("v1", "v2", "v3", "v4", "v6") if getattr(nota, f"{e}_ref") is None]
-    if faltando:
+    if faltando and not nota.ilustrativo:
         avisos.append(f"A referência não informa: {', '.join(faltando)}.")
     return avisos
 
@@ -139,6 +157,7 @@ class EssenciasService:
                     v4=valores["v4"],
                     v6=valores["v6"],
                     confianca_referencia=nota.confianca_referencia,
+                    ilustrativa=nota.ilustrativo,
                     fonte=nota.fonte,
                     avisos=_avisos_referencia(nota),
                 )
@@ -164,8 +183,14 @@ class EssenciasService:
         # Origem e confiança vêm da referência só no cadastro; na edição, o que
         # a aluna já informou sobre a essência dela continua valendo.
         if atual is None:
-            dados.setdefault("origem", "tecnico")
-            dados.setdefault("confianca", nota.confianca_referencia)
+            if nota.ilustrativo:
+                # Exemplo nunca vira "ficha técnica": a classificação é uma
+                # estimativa que a aluna aceitou, com confiança baixa.
+                dados.setdefault("origem", "estimado")
+                dados.setdefault("confianca", "baixa")
+            else:
+                dados.setdefault("origem", "tecnico")
+                dados.setdefault("confianca", nota.confianca_referencia)
 
     def _nota_ou_404(self, nota_id: int) -> KnowledgeNote:
         nota = self.conhecimento.nota(nota_id)

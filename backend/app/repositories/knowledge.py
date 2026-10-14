@@ -35,9 +35,11 @@ class KnowledgeRepository:
         return self.db.scalars(stmt).all()
 
     def descritores(self) -> Sequence[KnowledgeDescriptor]:
-        """Vocabulário de descritores."""
-        stmt = select(KnowledgeDescriptor).order_by(
-            KnowledgeDescriptor.categoria, KnowledgeDescriptor.nome
+        """Características sensoriais vigentes (as desativadas ficam de fora)."""
+        stmt = (
+            select(KnowledgeDescriptor)
+            .where(KnowledgeDescriptor.ativo.is_(True))
+            .order_by(KnowledgeDescriptor.categoria, KnowledgeDescriptor.nome)
         )
         return self.db.scalars(stmt).all()
 

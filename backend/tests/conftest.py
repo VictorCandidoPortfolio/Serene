@@ -34,7 +34,7 @@ for _var in ("CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECR
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
-from sqlalchemy import create_engine, event  # noqa: E402
+from sqlalchemy import create_engine, event, select  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
@@ -44,6 +44,7 @@ from app.core.email import caixa_de_saida  # noqa: E402
 from app.db.base import Base  # noqa: E402
 from app.main import app  # noqa: E402
 from app.seed import popular  # noqa: E402
+from app.models.knowledge import KnowledgeFamily, KnowledgeNote  # noqa: E402
 from tests.util import SENHA_PADRAO, ultimo_codigo  # noqa: E402
 
 
@@ -83,6 +84,25 @@ def db():
     finally:
         sessao.close()
         Base.metadata.drop_all(_engine)
+
+
+@pytest.fixture()
+def nota_validada(db):
+    """Id de uma nota de referência VALIDADA (ilustrativo=False), com números.
+
+    O seed só traz notas de exemplo; esta fixture cobre o caminho que a base
+    oficial vai usar: aplicar uma referência copia também os números.
+    """
+    familia = db.scalar(select(KnowledgeFamily).filter_by(slug="amadeirado"))
+    nota = KnowledgeNote(
+        nome="Cedro validado (teste)", sinonimos=[], family_id=familia.id,
+        tipo_referencia="simples", papel_tipico={"saida": 0.0, "coracao": 0.2, "fundo": 0.8},
+        v1_ref=5.0, v2_ref=8.0, v3_ref=2.0, v4_ref=5.0, v6_ref=0.0,
+        confianca_referencia="alta", descritores=[], ilustrativo=False,
+    )
+    db.add(nota)
+    db.commit()
+    return nota.id
 
 
 @pytest.fixture()

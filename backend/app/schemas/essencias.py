@@ -118,6 +118,8 @@ class SugestaoReferencia(ORMModel):
     v4: float | None
     v6: float | None = None
     confianca_referencia: str
+    # True = nota de exemplo (não validada): vem sem números, só classificação.
+    ilustrativa: bool = False
     fonte: str | None
     avisos: list[str] = []
 

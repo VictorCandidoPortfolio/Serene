@@ -1,5 +1,7 @@
 """Fluxo ponta a ponta pela API: cadastro → reconhecimento → acorde → ajuste → teste → coleção."""
 
+from tests.util import VALORES_DA_ALUNA
+
 
 def _post(client, url, json, h, esperado=201):
     r = client.post(url, json=json, headers=h)
@@ -17,34 +19,45 @@ def test_reconhecimento_sugere_mas_nao_aplica_sozinho(client, nova_usuaria):
     sug = e["sugestoes_referencia"][0]
     assert sug["nome"] == "Bergamota" and sug["correspondencia"] == "exata"
 
-    # A aluna confirma, informando o v4 dela (que vence a referência).
+    # A nota da base é de EXEMPLO: a sugestão traz a marca, o aviso e só a classificação.
+    assert sug["ilustrativa"] is True and sug["v1"] is None and sug["papel"] is None
+    assert any("EXEMPLO" in a for a in sug["avisos"])
+
+    # A aluna confirma, informando o v4 dela. Só a classificação vem da nota;
+    # o exemplo nunca vira "ficha técnica" nem copia número para a essência.
     e2 = _post(
         client, "/essencias",
         {"nome": "Bergamota Fornecedor X", "knowledge_note_id": sug["nota_id"],
          "aplicar_referencia": True, "v4": 4},
         h,
     )
-    assert e2["familia"] == "Cítrico" and e2["v1"] == sug["v1"]
-    assert e2["v4"] == 4 and e2["editado_da_referencia"] is True
-    assert e2["origem"] == "tecnico" and e2["sugestoes_referencia"] == []
+    assert e2["familia"] == "Cítrico" and e2["v1"] is None and e2["v4"] == 4
+    assert e2["origem"] == "estimado" and e2["confianca"] == "baixa"
+    assert e2["editado_da_referencia"] is False and e2["sugestoes_referencia"] == []
 
     # Referência composta/baixa confiança vem com aviso.
     avisos = client.get("/essencias/sugestao-classificacao", params={"nome": "ambar"}, headers=h).json()
     assert avisos and len(avisos[0]["avisos"]) >= 2
 
+
+def test_nota_validada_copia_numeros_e_marca_edicao(client, nova_usuaria, nota_validada):
+    """Quando a base oficial entrar (ilustrativo=False), aplicar a referência copia os números."""
+    h = nova_usuaria("v@exemplo.com")
+    e = _post(client, "/essencias", {"nome": "Cedro", "knowledge_note_id": nota_validada,
+                                     "aplicar_referencia": True}, h)
+    assert e["v2"] == 8 and e["origem"] == "tecnico" and e["confianca"] == "alta"
+    assert e["editado_da_referencia"] is False
     # Editar um valor vindo da referência marca a essência como editada.
-    e3 = _post(client, "/essencias", {"nome": "Cedro", "knowledge_note_id": 4,
-                                      "aplicar_referencia": True}, h)
-    r = client.put(f"/essencias/{e3['id']}", json={"v2": 9}, headers=h).json()
+    r = client.put(f"/essencias/{e['id']}", json={"v2": 9}, headers=h).json()
     assert r["editado_da_referencia"] is True
 
 
 def test_fluxo_criacao_acorde_ajuste_teste_colecao(client, nova_usuaria):
     h = nova_usuaria("fluxo@exemplo.com")
     jasmim = _post(client, "/essencias", {"nome": "Jasmim", "knowledge_note_id": 3,
-                                          "aplicar_referencia": True}, h)
+                                          "aplicar_referencia": True, **VALORES_DA_ALUNA["Jasmim"]}, h)
     cedro = _post(client, "/essencias", {"nome": "Cedro", "knowledge_note_id": 4,
-                                         "aplicar_referencia": True}, h)
+                                         "aplicar_referencia": True, **VALORES_DA_ALUNA["Cedro"]}, h)
 
     perfil = _post(client, "/perfis", {"respostas": {
         "emocoes": ["amor", "serenidade"], "territorios": ["acolhimento"], "publico": "teen",
@@ -71,7 +84,7 @@ def test_fluxo_criacao_acorde_ajuste_teste_colecao(client, nova_usuaria):
 
     # Com uma bergamota no repertório, o ajuste passa a ser possível.
     berg = _post(client, "/essencias", {"nome": "Bergamota", "knowledge_note_id": 1,
-                                        "aplicar_referencia": True}, h)
+                                        "aplicar_referencia": True, **VALORES_DA_ALUNA["Bergamota"]}, h)
     ajuste = _post(client, f"{url}/{v1['id']}/ajuste", {"movimento": "mais_fresco"}, h, 200)
     assert ajuste["alcancavel"] is True
     assert ajuste["sugestoes"][0]["essencia_id"] == berg["id"]

@@ -52,7 +52,9 @@ function Painel({ ess, cri, fam, navigate }) {
   const presentes = new Set(ess.map((e) => normalizar(e.familia)));
   const cobertas = raizes.filter((f) => {
     const filhas = fam.filter((x) => x.parent_id === f.id).map((x) => normalizar(x.nome));
-    return presentes.has(normalizar(f.nome)) || filhas.some((n) => presentes.has(n));
+    // "Aquático/Marinho" também conta quando a essência diz só "Aquático" ou "Marinho".
+    const nomes = [f.nome, ...f.nome.split('/')].map(normalizar);
+    return nomes.some((n) => presentes.has(n)) || filhas.some((n) => presentes.has(n));
   });
   const cobertura = raizes.length ? cobertas.length / raizes.length : 0;
   const aprovadas = cri.filter((c) => c.status === 'aprovada').length;

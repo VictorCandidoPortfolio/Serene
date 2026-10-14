@@ -11,9 +11,10 @@ import re
 import pytest
 
 from app.main import app
+from tests.util import VALORES_DA_ALUNA
 
 TERRITORIOS = {"acolhimento", "delicadeza", "alegria", "amor", "encanto", "renovacao",
-               "frescor", "elegancia", "magnetismo"}
+               "frescor", "elegancia", "magnetismo", "sensualidade"}
 
 
 def _post(client, url, json, h, esperado=201):
@@ -24,11 +25,11 @@ def _post(client, url, json, h, esperado=201):
 
 @pytest.fixture()
 def repertorio(client, nova_usuaria):
-    """Usuária com 3 essências classificadas pela referência (Jasmim, Cedro, Bergamota)."""
+    """Usuária com 3 essências (Jasmim, Cedro, Bergamota): família pela nota de exemplo, números dela."""
     h = nova_usuaria("ana@exemplo.com")
     ids = {
         nome: _post(client, "/essencias", {"nome": nome, "knowledge_note_id": nota,
-                                          "aplicar_referencia": True}, h)["id"]
+                                          "aplicar_referencia": True, **VALORES_DA_ALUNA[nome]}, h)["id"]
         for nome, nota in (("Bergamota", 1), ("Jasmim", 3), ("Cedro", 4))
     }
     return h, ids
@@ -60,7 +61,8 @@ def test_floralidade_entra_no_acorde_e_no_movimento(client, repertorio):
     assert ajuste["alcancavel"] and ajuste["sugestoes"][0]["essencia_id"] == ids["Jasmim"]
 
 
-def test_nove_territorios_da_descricao(client, nova_usuaria):
+def test_territorios_da_descricao(client, nova_usuaria):
+    """Os territórios vêm do banco e incluem os da descrição do produto."""
     h = nova_usuaria("t@exemplo.com")
     chaves = {t["chave"] for t in client.get("/conhecimento/territorios", headers=h).json()}
     assert TERRITORIOS <= chaves

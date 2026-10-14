@@ -62,6 +62,9 @@ class ContextoMotor:
         idx: dict[str, KnowledgeFamily] = {}
         for f in self._familias:
             idx[chave(f.nome)] = f
+            # "Aquático/Marinho" também é reconhecida como "Aquático" ou "Marinho".
+            for parte in f.nome.split("/"):
+                idx.setdefault(chave(parte), f)
             idx[f.slug] = f  # slug tem prioridade sobre nome em caso de colisão
         return idx
 

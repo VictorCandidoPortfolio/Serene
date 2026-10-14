@@ -304,6 +304,11 @@ class ConhecimentoService:
         `territorio/<chave>` — sem deploy.
         """
         return [
-            {"chave": r.chave, "descricao": r.descricao, **(r.valor if isinstance(r.valor, dict) else {})}
+            {
+                "chave": r.chave,
+                "descricao": r.descricao,
+                "ilustrativo": r.ilustrativo,
+                **(r.valor if isinstance(r.valor, dict) else {}),
+            }
             for r in self.repo.regras(tipo)
         ]
