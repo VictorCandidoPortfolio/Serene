@@ -1,0 +1,6 @@
+# Nunca enviar para o Vercel: segredos locais e artefatos gerados localmente.
+.env
+.env.*
+!.env.example
+node_modules/
+dist/

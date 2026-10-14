@@ -1,0 +1,9 @@
+# Nunca enviar para o Vercel: segredos locais, ambiente virtual e caches.
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+tests/

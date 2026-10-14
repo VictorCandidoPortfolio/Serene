@@ -1,0 +1,24 @@
+# Dependências de PRODUÇÃO, com versões fixadas (testadas em Python 3.14).
+# É este arquivo que o Vercel instala. Ferramentas de teste ficam em
+# requirements-dev.txt, para não engordar o pacote da função.
+
+# --- API ---
+fastapi==0.141.1
+uvicorn[standard]==0.53.0
+python-multipart==0.0.32      # necessário para o form OAuth2 do /auth/login
+pydantic==2.13.5
+email-validator==2.3.0        # habilita o tipo EmailStr do Pydantic
+
+# --- Banco ---
+SQLAlchemy==2.0.54
+alembic==1.20.0
+PyMySQL==1.2.3                # driver MySQL puro-Python
+cryptography==50.0.1          # exigido pelo PyMySQL para o auth caching_sha2 do MySQL 8
+certifi==2026.7.22            # autoridades certificadoras para o TLS do banco (DATABASE_SSL)
+
+# --- Segurança ---
+PyJWT==2.15.0
+bcrypt==5.0.0                 # usado direto (o passlib foi removido: sem manutenção)
+
+# --- Configuração ---
+python-dotenv==1.2.3
