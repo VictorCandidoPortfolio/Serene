@@ -22,3 +22,6 @@ bcrypt==5.0.0                 # usado direto (o passlib foi removido: sem manute
 
 # --- Configuração ---
 python-dotenv==1.2.3
+
+pymysql
+certifi
