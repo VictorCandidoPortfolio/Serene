@@ -30,6 +30,10 @@ export default function Criacoes() {
         </button>
       </Cabecalho>
 
+      <Link to="/criacoes/laboratorio" className="btn btn-primario">
+        ✨ O que você quer criar?
+      </Link>
+
       <Erro erro={error} onRetry={reload} />
       {loading && !lista ? (
         <Carregando />

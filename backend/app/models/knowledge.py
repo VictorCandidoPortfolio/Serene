@@ -53,6 +53,14 @@ TIPOS_REGRA = (
     "peso_score",
     "territorio",
     "publico",
+    # Motor de criação ("O que você quer criar?"). Têm tipo próprio porque o
+    # formato difere das regras `emocao`/`preferencia` do questionário de perfil
+    # (deslocamentos relativos + pontos de território, em vez de vetor absoluto).
+    "criacao_emocao",
+    "criacao_preferencia",
+    "criacao_idade",
+    "criacao_territorio",
+    "criacao_vocabulario",
 )
 
 

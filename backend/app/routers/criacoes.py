@@ -7,7 +7,9 @@ from fastapi import APIRouter, Depends, status
 from app.core.dependencies import CurrentUser, DbSession
 from app.schemas.criacoes import CriacaoCreate, CriacaoOut, CriacaoUpdate
 from app.schemas.outros import RecomendacoesOut
+from app.schemas.sugestao import OpcoesSugestaoOut, SugestaoIn, SugestaoOut
 from app.services.criacoes_service import CriacoesService
+from app.services.sugestao_service import SugestaoService
 
 router = APIRouter(prefix="/criacoes", tags=["criacoes"])
 
@@ -24,6 +26,18 @@ Service = Annotated[CriacoesService, Depends(_service)]
 def listar(svc: Service):
     """Criações da usuária."""
     return svc.listar()
+
+
+@router.get("/sugerir/opcoes", response_model=OpcoesSugestaoOut)
+def opcoes_sugestao(db: DbSession, user: CurrentUser):
+    """Emoções, preferências, gêneros e faixas de idade do formulário (vêm do banco)."""
+    return SugestaoService(db, user.id).opcoes()
+
+
+@router.post("/sugerir", response_model=SugestaoOut)
+def sugerir(payload: SugestaoIn, db: DbSession, user: CurrentUser):
+    """Prévia: identidade + acorde sugerido só com o repertório da usuária. Não grava."""
+    return SugestaoService(db, user.id).sugerir(payload)
 
 
 @router.post("", response_model=CriacaoOut, status_code=status.HTTP_201_CREATED)

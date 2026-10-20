@@ -198,11 +198,47 @@ Tudo exige o token; a lógica fica em [app/services/conta_service.py](app/servic
 | Perfil olfativo (com intensidade, idade e referência) | `/perfis` | `engine/recommendation.py::calcular_vetor_alvo` |
 | Identidade de um acorde (territórios que transmite) | `GET /criacoes/{id}/acordes/{aid}/identidade` | `engine/recommendation.py::identificar_territorios` |
 | Criador de fragrâncias (direção por perfil, território ou referência + sugestões) | `POST /criacoes` (`perfil_id` \| `intencao` \| `referencia_id`), `GET /criacoes/{id}/recomendacoes` | `services/criacoes_service.py` |
+| **Motor de criação** ("O que você quer criar?": pedido → identidade + acorde sugerido) | `POST /criacoes/sugerir` (prévia, não grava), `GET /criacoes/sugerir/opcoes`, `POST /criacoes` com `sugestao` | `engine/criacao.py`, `services/sugestao_service.py` |
 | Compatibilidade sem gravar acorde | `POST /essencias/compatibilidade` | `engine/compatibility.py` |
 | Caminhos de uma referência | `GET /referencias/{id}/caminhos` | `engine/referencias.py` |
 | Evolução (motivo de cada versão) | `POST /criacoes/{id}/acordes` (`motivo`) | `models/repertorio.py::Acorde.motivo` |
 | Identidade geral da coleção | `GET /colecoes` (`identidade_geral`) | `services/outros_service.py::ColecoesService.identidade` |
 | 10 territórios, 3 públicos | `GET /conhecimento/territorios`, `/publicos` | `seed/data.py` (nomes da cliente; vetores de exemplo) |
+
+### Motor de criação: o algoritmo em 1 minuto
+
+Determinístico (sem `random`, sem modelo de linguagem): o mesmo pedido gera sempre a mesma resposta.
+Textos explicativos saem de **templates**. Todos os números ficam em `knowledge_engine_rules`
+(tipos `criacao_emocao`, `criacao_preferencia`, `criacao_idade`, `criacao_territorio`,
+`criacao_vocabulario` e `peso_score/criacao_score`, `peso_score/criacao_padrao_pesos`), populados por
+`app/seed/data_criacao.py`; a professora calibra editando linhas, sem mexer em código.
+
+1. **Vetor-alvo**: parte do neutro (`v1=v2=v3=5`, `v5=4`) e de `v4 = intensidade pedida`; soma os
+   deslocamentos de cada emoção/preferência e da idade (clamp 0–10). O `v4` das regras de emoção é
+   ignorado aqui: a presença vem só da intensidade (e do teto de idade, ex.: bebê ≤ 3).
+2. **Territórios**: cada emoção/preferência soma pontos a famílias de gosto (Floral, Fresco...). Vale o
+   primeiro; o segundo entra se tiver ≥ 50 % dos pontos do primeiro.
+3. **Ranking** das essências **da aluna**: `score = bônus_território × 2 + proximidade` (v1–v4).
+4. **Montagem gulosa**: começa pela melhor e só acrescenta a essência que aproxima o acorde do alvo e
+   combina com as já escolhidas; para quando adicionar não ajuda. Máximo 4 essências (3 para bebê).
+5. **Pesos relativos** fixos por tamanho (`[2,2]`, `[3,2,1]`, `[3,2,2,1]` = Pouco/Médio/Bastante).
+   Nunca são porcentagem nem quantidade de produto.
+6. **Lacunas**: se o repertório não alcança a direção, o motor **nomeia a categoria** que falta
+   (território/família), nunca uma essência.
+
+`POST /criacoes` com `sugestao` recalcula tudo no servidor (nada vindo do cliente é confiado), grava o
+perfil (`perfis_olfativos.respostas`), a criação (`direcao`) e a versão 1 do acorde.
+
+**Limitações conhecidas** (heurística pedagógica, não ciência exata):
+
+- Os números (deslocamentos por emoção, limiares, pesos de score, curva de coerência) são **valores
+  iniciais** e precisam ser calibrados com o repertório real e testes olfativos reais.
+- A sugestão é tão boa quanto a classificação das essências (eixos, papel, família). Essência mal
+  classificada gera sugestão ruim; sem dados, o motor diz que não tem informação suficiente.
+- A montagem é **gulosa**: previsível e explicável, mas não garante o melhor acorde possível.
+- Pesos fixos por posição (`[3,2,1]`) são simplificação pedagógica; a proporção real depende da
+  intensidade e da persistência de cada essência e deve ser validada em bancada.
+- O motor orienta a criação; **não prevê** como a mistura vai cheirar na pele.
 
 Testes: [tests/test_funcionalidades.py](tests/test_funcionalidades.py), que também varre o OpenAPI e
 falha se alguma rota nova ficar sem exigir login.

@@ -98,6 +98,20 @@ def _buscar_relacao(
     return None
 
 
+def relacao_entre(
+    familia_a: str,
+    familia_b: str,
+    relacoes: Sequence[RelacaoFamilias],
+    hierarquia: dict[str, str] | None = None,
+) -> RelacaoFamilias | None:
+    """Relação cadastrada entre duas famílias (com herança da família-mãe), ou None.
+
+    Versão pública de `_buscar_relacao`, para o motor de criação consultar
+    relações de "atenção" sem recalcular o score de compatibilidade inteiro.
+    """
+    return _buscar_relacao(familia_a, familia_b, _indexar(relacoes), hierarquia or {})
+
+
 def compatibilidade_par(
     a: EssenciaMotor,
     b: EssenciaMotor,

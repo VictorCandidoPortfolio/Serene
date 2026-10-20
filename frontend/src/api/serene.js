@@ -73,6 +73,9 @@ export const criacoes = {
   atualizar: (id, dados) => request(`/criacoes/${id}`, { method: 'PUT', body: dados }),
   apagar: (id) => request(`/criacoes/${id}`, { method: 'DELETE' }),
   recomendacoes: (id) => request(`/criacoes/${id}/recomendacoes`),
+  // Motor de criação ("O que você quer criar?"): prévia que não grava nada.
+  opcoesSugestao: () => request('/criacoes/sugerir/opcoes'),
+  sugerir: (pedido) => request('/criacoes/sugerir', { method: 'POST', body: pedido }),
 };
 
 export const acordes = {

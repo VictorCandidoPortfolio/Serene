@@ -200,3 +200,71 @@ def test_repositorio_forca_dona_no_insert_e_filtra_leitura(client, cenario, db):
     assert cenario["essencia"]["id"] not in repo_b.get_many([cenario["essencia"]["id"]])
     assert AcordeRepository(db, id_b).get(cenario["criacao"]["id"], cenario["acorde"]["id"]) is None
     assert AcordeRepository(db, id_a).get(cenario["criacao"]["id"], cenario["acorde"]["id"]) is not None
+
+
+# ---------------------------------------------------------------------------
+# Motor de criação ("O que você quer criar?")
+# ---------------------------------------------------------------------------
+def _pedido():
+    return {"genero": "feminino", "idade": 15, "emocoes": ["amor", "paz"], "preferencias": ["doce", "floral"]}
+
+
+@pytest.fixture()
+def cenario_sugestao(client, nova_usuaria):
+    """A com repertório e uma criação nascida de uma sugestão; B recém-criada."""
+    from tests.test_sugestao_api import cadastrar
+
+    a = nova_usuaria("sa@exemplo.com", nome="A")
+    b = nova_usuaria("sb@exemplo.com", nome="B")
+    ids = cadastrar(client, a)
+    r = client.post("/criacoes", json={"nome": "Luna", "sugestao": _pedido()}, headers=a)
+    assert r.status_code == 201, r.text
+    return {"a": a, "b": b, "ids": ids, "criacao": r.json()}
+
+
+def test_sugestao_de_b_nunca_usa_essencia_de_a(client, cenario_sugestao):
+    c = cenario_sugestao
+    r = client.post("/criacoes/sugerir", json=_pedido(), headers=c["b"])
+    assert r.status_code == 200
+    corpo = r.json()
+    assert corpo["status"] == "insuficiente" and corpo["acorde"] is None  # usuária sem essências
+    # A, com o mesmo pedido, recebe acorde: a diferença é só o repertório.
+    assert client.post("/criacoes/sugerir", json=_pedido(), headers=c["a"]).json()["acorde"]["itens"]
+
+
+def test_b_nao_passa_ids_de_a_em_essencias_disponiveis(client, cenario_sugestao):
+    c = cenario_sugestao
+    alheios = list(c["ids"].values())[:3]
+    r = client.post("/criacoes/sugerir", json={**_pedido(), "essencias_disponiveis": alheios}, headers=c["b"])
+    assert r.status_code == 404
+    # misturar id próprio com id alheio também é recusado por inteiro
+    proprio = client.post("/essencias", json={"nome": "Minha"}, headers=c["b"]).json()["id"]
+    r = client.post("/criacoes/sugerir", json={**_pedido(), "essencias_disponiveis": [proprio, alheios[0]]},
+                    headers=c["b"])
+    assert r.status_code == 404
+
+
+def test_b_nao_cria_criacao_com_essencias_de_a(client, cenario_sugestao):
+    c = cenario_sugestao
+    r = client.post("/criacoes", json={"nome": "X", "sugestao": {**_pedido(),
+                    "essencias_disponiveis": list(c["ids"].values())}}, headers=c["b"])
+    assert r.status_code == 404
+    assert client.get("/criacoes", headers=c["b"]).json() == []
+
+
+def test_b_nao_le_perfil_criacao_nem_acorde_nascidos_da_sugestao_de_a(client, cenario_sugestao):
+    c = cenario_sugestao
+    cid = c["criacao"]["id"]
+    perfil_id = c["criacao"]["direcao"]["perfil_id"]
+    acorde_id = client.get(f"/criacoes/{cid}/acordes", headers=c["a"]).json()[0]["id"]
+    for rota in (f"/criacoes/{cid}", f"/criacoes/{cid}/acordes", f"/criacoes/{cid}/acordes/{acorde_id}",
+                 f"/perfis/{perfil_id}"):
+        assert client.get(rota, headers=c["a"]).status_code == 200, rota
+        assert client.get(rota, headers=c["b"]).status_code == 404, rota
+    assert client.get("/perfis", headers=c["b"]).json() == []
+
+
+def test_usuaria_nova_comeca_com_repertorio_vazio(client, nova_usuaria):
+    h = nova_usuaria("nova@exemplo.com")
+    assert client.get("/essencias", headers=h).json() == []
+    assert client.post("/criacoes/sugerir", json=_pedido(), headers=h).json()["status"] == "insuficiente"

@@ -230,3 +230,9 @@ REGRAS = [
      {"min_eixos_comparados": 2, "proximidade_minima": 50, "max_territorios": 3},
      "Parâmetros da identificação dos territórios de um acorde."),
 ]
+
+
+# Regras do motor de criação (arquivo próprio: valores iniciais a calibrar).
+from app.seed.data_criacao import REGRAS_CRIACAO  # noqa: E402
+
+REGRAS = REGRAS + REGRAS_CRIACAO

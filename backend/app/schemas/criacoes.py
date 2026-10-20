@@ -8,6 +8,7 @@ from pydantic import Field, field_validator, model_validator
 from app.engine.axes import NOMES_PESO
 from app.schemas.common import EdicaoModel, EntradaModel, LacunaOut, ORMModel, TextoLongo
 from app.schemas.outros import RespostasPerfil
+from app.schemas.sugestao import SugestaoIn
 
 StatusCriacao = Literal["rascunho", "em_ajuste", "aprovada", "arquivada"]
 PesoRelativo = Literal["pouco", "medio", "bastante"]
@@ -24,7 +25,10 @@ class CriacaoCreate(EntradaModel):
 
     - `perfil_id`: um perfil olfativo já criado;
     - `intencao`: território(s), emoções e público escolhidos na hora;
-    - `referencia_id`: um perfume de referência (direção estimada).
+    - `referencia_id`: um perfume de referência (direção estimada);
+    - `sugestao`: o pedido "O que você quer criar?". O servidor RECALCULA
+      identidade e acorde (nunca confia em números do cliente), grava o perfil
+      e a primeira versão do acorde.
     """
 
     nome: str = Field(min_length=1, max_length=160)
@@ -33,12 +37,14 @@ class CriacaoCreate(EntradaModel):
     perfil_id: int | None = None
     intencao: RespostasPerfil | None = None
     referencia_id: int | None = Field(default=None, ge=1)
+    sugestao: SugestaoIn | None = None
 
     @model_validator(mode="after")
     def _uma_origem(self) -> "CriacaoCreate":
-        origens = [o for o in (self.perfil_id, self.intencao, self.referencia_id) if o is not None]
+        origens = [o for o in (self.perfil_id, self.intencao, self.referencia_id, self.sugestao)
+                   if o is not None]
         if len(origens) > 1:
-            raise ValueError("escolha só uma origem de direção: perfil, intenção ou referência")
+            raise ValueError("escolha só uma origem de direção: perfil, intenção, referência ou sugestão")
         return self
 
 

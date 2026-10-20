@@ -15,7 +15,7 @@ from app.engine.compatibility import compatibilidade_grupo
 from app.engine.movement import sugerir_ajuste
 from app.engine.recommendation import identificar_territorios
 from app.engine.vectors import calcular_acorde
-from app.models.repertorio import Acorde, Criacao, Teste
+from app.models.repertorio import Acorde, Criacao, PerfilOlfativo, Teste
 from app.repositories.repertorio import (
     AcordeRepository,
     CriacaoRepository,
@@ -25,6 +25,7 @@ from app.repositories.repertorio import (
 )
 from app.schemas.criacoes import (
     AcordeCreate,
+    AcordeItemIn,
     AjusteOut,
     CriacaoCreate,
     CriacaoUpdate,
@@ -33,6 +34,7 @@ from app.schemas.criacoes import (
 from app.services.motor import ContextoMotor, regras_obrigatorias
 from app.services.outros_service import ReferenciasService
 from app.services.perfis_service import calcular_alvo, direcao_de, direcao_do_perfil, recomendar
+from app.services.sugestao_service import SugestaoService
 
 
 class CriacoesService:
@@ -80,10 +82,53 @@ class CriacoesService:
 
     def criar(self, payload: CriacaoCreate) -> Criacao:
         """Cria a criação, com direção vinda de perfil, intenção ou referência (opcional)."""
+        if payload.sugestao is not None:
+            return self._criar_com_sugestao(payload)
         criacao = Criacao(nome=payload.nome, objetivo=payload.objetivo, status=payload.status)
         criacao.direcao = self._direcao(payload)
         self.repo.add(criacao)
         self.db.commit()
+        return criacao
+
+    def _criar_com_sugestao(self, payload: CriacaoCreate) -> Criacao:
+        """Cria a criação a partir do pedido "O que você quer criar?".
+
+        A sugestão é RECALCULADA aqui, no servidor, a partir do pedido e do
+        repertório da usuária: nenhum número vindo do cliente é aceito. Grava
+        (1) o perfil olfativo com as respostas, (2) a criação com a `direcao`
+        e (3) a primeira versão do acorde, pelo mesmo caminho de qualquer
+        versão (vetor, pirâmide e compatibilidade calculados pelo motor atual).
+        Sem acorde sugerido (repertório vazio ou de 1 essência), grava só a
+        criação com a direção — um acorde exige ao menos 2 essências.
+        """
+        user_id = self.repo.user_id
+        sugestao = SugestaoService(self.db, user_id).sugerir(payload.sugestao)
+        tecnico = sugestao.tecnico
+        perfil = self.perfis.add(PerfilOlfativo(
+            respostas=payload.sugestao.model_dump(exclude_none=True),
+            vetor_alvo={"origem": "criacao", "vetor": tecnico["vetor_alvo"],
+                        "territorios_olfativos": tecnico["dominantes"]},
+        ))
+        identidade = sugestao.identidade
+        criacao = Criacao(nome=payload.nome, objetivo=payload.objetivo, status=payload.status)
+        criacao.direcao = {
+            "origem": "sugestao", "perfil_id": perfil.id,
+            "vetor_alvo": tecnico["vetor_alvo"], "territorios": [],
+            "territorios_olfativos": tecnico["dominantes"],
+            "emocoes": payload.sugestao.emocoes, "publico": tecnico.get("faixa_idade"),
+            "vocabulario": [], "texto": identidade.direcao if identidade else "Sem direção definida.",
+            "identidade": identidade.model_dump() if identidade else None,
+            "avisos": sugestao.avisos, "lacunas": [l.model_dump() for l in sugestao.lacunas],
+        }
+        self.repo.add(criacao)
+        self.db.commit()
+        itens = sugestao.acorde.itens if sugestao.acorde else []
+        if len(itens) >= 2:
+            AcordesService(self.db, user_id).criar(criacao.id, AcordeCreate(
+                itens=[AcordeItemIn(essencia_id=i.essencia_id, peso=i.peso) for i in itens],
+                motivo="Sugestão inicial do laboratório",
+            ))
+            self.db.refresh(criacao)
         return criacao
 
     def atualizar(self, criacao_id: int, payload: CriacaoUpdate) -> Criacao:
