@@ -34,6 +34,7 @@ from app.services.motor import ContextoMotor, regras_obrigatorias
 from app.services.outros_service import ReferenciasService
 from app.services.perfis_service import calcular_alvo, direcao_de, direcao_do_perfil, recomendar
 from app.schemas.formulacao_pedido import FormulacaoPedidoIn
+from app.services.essencias_service import EssenciasService
 from app.services.formulacao_service import FormulacaoService
 from app.services.sugestao_service import SugestaoService
 
@@ -130,6 +131,18 @@ class CriacoesService:
         self.repo.add(criacao)
         self.db.commit()
         itens = sugestao.acorde.itens if sugestao.acorde else []
+        if len(itens) >= 2 and sugestao.estimadas_pelo_nome:
+            # A tela já mostrou que o perfil GERAL foi usado nestas essências: ao salvar, ele é
+            # registrado nelas (pelo mesmo caminho do cadastro simples), e o acorde nasce com dados.
+            ess_svc = EssenciasService(self.db, user_id)
+            usados = {i.essencia_id for i in itens}
+            for e in sugestao.estimadas_pelo_nome:
+                if e.id in usados:
+                    ess_svc.aplicar_perfil_geral(e.id, ess_svc._nota_ou_404(e.nota_id))
+        # Alertas de segurança e resumo do briefing ficam na direção da criação.
+        criacao.direcao = {**(criacao.direcao or {}), "alertas_seguranca": sugestao.alertas_seguranca,
+                           "resumo_briefing": [r.model_dump() for r in sugestao.resumo_briefing]}
+        self.db.commit()
         if len(itens) >= 2:
             AcordesService(self.db, user_id).criar(criacao.id, AcordeCreate(
                 itens=[AcordeItemIn(essencia_id=i.essencia_id, peso=i.peso) for i in itens],

@@ -56,6 +56,7 @@ CHAVES_SCORE = (
     "familia_segunda_fracao", "coerencia_ideal", "coerencia_sigma", "peso_coerencia",
     "peso_complementaridade", "peso_risco", "risco_atencao", "margem_isolada",
     "lacuna_eixo_minima", "cobertura_minima", "tolerancia_eixo", "intensidade_padrao",
+    "pontos_familia_desejada",
 )
 
 
@@ -85,6 +86,9 @@ class Pedido:
     emocoes: tuple[str, ...] = ()
     preferencias: tuple[str, ...] = ()
     intensidade: float = 5.0
+    # Famílias olfativas desejadas, já resolvidas para a chave do grupo de cheiro (ex.: "fresco").
+    familias_desejadas: tuple[str, ...] = ()
+    ocasiao: str | None = None
 
 
 @dataclass(frozen=True)
@@ -243,8 +247,13 @@ def calcular_vetor_alvo(
     regras_preferencia: Mapping[str, Mapping[str, Any]],
     regras_idade: Mapping[str, Mapping[str, Any]],
     params: Mapping[str, Any],
+    regras_ocasiao: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> ResultadoAlvo:
     """Traduz o pedido num vetor-alvo e num placar de territórios.
+
+    Além de emoções e preferências, o briefing alimenta o alvo com: famílias
+    olfativas desejadas (`pontos_familia_desejada` por família, no placar de
+    territórios) e ocasião de uso (regra com `target`/`terr`, como as demais).
 
     Parte do ponto neutro (`params["ponto_neutro"]`; v4 = intensidade pedida) e
     soma os deslocamentos de cada emoção/preferência reconhecida, com `clamp`
@@ -294,6 +303,16 @@ def calcular_vetor_alvo(
             ok.append(k)
         else:
             nao_reconhecidos.append(f"{tipo}:{bruto}")
+
+    for k in pedido.familias_desejadas:
+        territorios[k] = territorios.get(k, 0.0) + float(params["pontos_familia_desejada"])
+        direcao[0] = True
+    if pedido.ocasiao:
+        regra_ocasiao = (regras_ocasiao or {}).get(pedido.ocasiao)
+        if regra_ocasiao is None:
+            nao_reconhecidos.append(f"ocasiao:{pedido.ocasiao}")
+        else:
+            aplicar(regra_ocasiao)
 
     max_itens = int(params["max_itens_padrao"])
     if pedido.faixa_idade:

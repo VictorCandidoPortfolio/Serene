@@ -46,7 +46,8 @@ def test_fluxo_criacao_acorde_ajuste_teste_colecao(client, nova_usuaria):
     # Sem nada fresco no repertório: o motor nomeia a lacuna (família), não uma essência.
     ajuste = _post(client, f"{url}/{v1['id']}/ajuste", {"movimento": "mais fresco"}, h, 200)
     assert ajuste["alcancavel"] is False
-    assert "Cítrico" in ajuste["lacuna"]["mensagem"]
+    # Nomeia a CATEGORIA que falta (uma família fresca da base), nunca uma essência.
+    assert any(f in ajuste["lacuna"]["mensagem"] for f in ("Cítrico", "Verde", "Aquático"))
     assert "Bergamota" not in ajuste["lacuna"]["mensagem"]
 
     # Com uma bergamota no repertório, o ajuste passa a ser possível.

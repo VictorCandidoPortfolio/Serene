@@ -689,3 +689,5 @@ input[type=range].inativo { opacity: 0.35; }
 .campo-check input { width: 22px; height: 22px; accent-color: var(--lilac-forte); flex: none; }
 
 .lista-pendencias { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; line-height: 1.45; }
+
+.aviso-forte { background: var(--erro-fundo); color: var(--erro); font-weight: 600; }

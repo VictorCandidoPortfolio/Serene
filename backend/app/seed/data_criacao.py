@@ -38,10 +38,18 @@ def _pref(chave, rotulo, target, terr):
             _CAL + f"Preferência '{rotulo}'.")
 
 
-def _idade(chave, rotulo, de, ate, delta, v4_max, max_itens):
+_ALERTA_INFANTIL = (
+    "Produto infantil: a fórmula calculada NÃO está aprovada para uso. Antes de qualquer teste é preciso "
+    "avaliação de segurança específica para a faixa etária (limite de uso de cada ingrediente, alérgenos, "
+    "teste dermatológico e documentação do fornecedor) e, quando aplicável, responsável técnico."
+)
+
+
+def _idade(chave, rotulo, de, ate, delta, v4_max, max_itens, infantil=False):
     return ("criacao_idade", chave,
             {"rotulo": rotulo, "anos_de": de, "anos_ate": ate, "delta": delta,
-             "v4_max": v4_max, "max_itens": max_itens},
+             "v4_max": v4_max, "max_itens": max_itens,
+             "infantil": infantil, "alerta_seguranca": _ALERTA_INFANTIL if infantil else None},
             _CAL + f"Idade: {rotulo} ({de} a {ate} anos).")
 
 
@@ -69,6 +77,8 @@ REGRAS_CRIACAO = [
     _emo("conforto", "conforto", {"v1": 1, "v3": 1}, {"Gourmand/Doce": 2}, "Aconchegante", "Conforto", "Aconchegante"),
     _emo("presenca", "presença", {"v4": 1, "v2": 1}, {"Amadeirado": 1, "Âmbar/Envolvente": 1}, "Marcante", "Presença", "Marcante"),
     _emo("energia", "energia", {"v1": -1, "v4": 1}, {"Frutado": 1, "Fresco": 1}, "Enérgica", "Energia", "Vibrante"),
+    _emo("confianca", "confiança", {"v2": 0.5}, {"Amadeirado": 1, "Aromático": 1, "Fresco": 1},
+         "Confiante", "Confiança", "Seguro"),
     _emo("liberdade", "liberdade", {"v1": -1, "v2": -1}, {"Fresco": 1, "Aromático": 1}, "Livre", "Liberdade", "Leve"),
     # -------------------------------------------------------- preferências
     _pref("doce", "doce", {"v3": 1}, {"Gourmand/Doce": 2}),
@@ -86,9 +96,9 @@ REGRAS_CRIACAO = [
     _pref("suave", "suave", {"v4": -2}, {}),
     _pref("sofisticado", "sofisticado", {"v5": 1, "v2": 0.5}, {"Amadeirado": 1, "Floral": 1}),
     # ---------------------------------------------------------------- idade
-    _idade("recem-nascido", "recém-nascido", 0, 0, {"v2": -1.5, "v5": -1.5}, 3, 3),
-    _idade("bebe", "bebê", 1, 2, {"v2": -1.5, "v5": -1.5}, 3, 3),
-    _idade("crianca", "criança", 3, 11, {"v2": -0.5, "v5": -0.5}, 4.5, 4),
+    _idade("recem-nascido", "recém-nascido", 0, 0, {"v2": -1.5, "v5": -1.5}, 3, 3, infantil=True),
+    _idade("bebe", "bebê", 1, 2, {"v2": -1.5, "v5": -1.5}, 3, 3, infantil=True),
+    _idade("crianca", "criança", 3, 11, {"v2": -0.5, "v5": -0.5}, 4.5, 4, infantil=True),
     _idade("adolescente", "adolescente", 12, 17, {}, None, 4),
     _idade("jovem", "jovem", 18, 29, {}, None, 4),
     _idade("adulto", "adulto", 30, 59, {}, None, 4),
@@ -134,6 +144,7 @@ REGRAS_CRIACAO = [
       "peso_coerencia": 0.4, "peso_complementaridade": 0.35, "peso_risco": 0.25,
       "risco_atencao": 3, "margem_isolada": 2,
       "lacuna_eixo_minima": 1.5, "cobertura_minima": 0.5, "tolerancia_eixo": 1.5,
+      "pontos_familia_desejada": 2,
       "intensidade_padrao": 5},
      _CAL + "Parâmetros do motor de criação (score das essências, montagem e compatibilidade)."),
     ("peso_score", "validacao",
@@ -169,6 +180,7 @@ _SINONIMOS = {
     ("criacao_emocao", "presenca"): ["destaque"],
     ("criacao_emocao", "energia"): ["energetica", "energetico", "vitalidade", "disposicao"],
     ("criacao_emocao", "liberdade"): ["livre", "solta", "solto"],
+    ("criacao_emocao", "confianca"): ["confiante", "segura", "seguro", "firme", "autoconfianca"],
     ("criacao_preferencia", "doce"): ["doces", "docinho", "docura", "adocicada", "adocicado"],
     ("criacao_preferencia", "citrico"): ["citrica", "citricos", "citricas", "citrus"],
     ("criacao_preferencia", "floral"): ["florais", "flor", "flores", "florida", "florido"],
@@ -186,6 +198,17 @@ REGRAS_CRIACAO = [
     (t, c, ({**v, "sinonimos": _SINONIMOS[(t, c)]} if (t, c) in _SINONIMOS else v), d)
     for t, c, v, d in REGRAS_CRIACAO
 ]
+REGRAS_CRIACAO.append((
+    "criacao_vocabulario", "ocasioes",
+    {"opcoes": {
+        "dia_a_dia": {"rotulo": "dia a dia", "target": {}, "terr": {"Fresco": 1, "Floral": 1}},
+        "trabalho": {"rotulo": "trabalho", "target": {"v5": 0.5}, "terr": {"Aromático": 1, "Fresco": 1}},
+        "esporte": {"rotulo": "esporte e movimento", "target": {"v1": -1}, "terr": {"Fresco": 2}},
+        "noite": {"rotulo": "noite", "target": {"v1": 1, "v2": 1}, "terr": {"Âmbar/Envolvente": 1, "Amadeirado": 1}},
+        "festa": {"rotulo": "festa", "target": {"v3": 0.5}, "terr": {"Frutado": 1, "Gourmand/Doce": 1}},
+        "dormir": {"rotulo": "hora de dormir", "target": {"v1": 0.5, "v2": -0.5}, "terr": {"Almiscarado": 1, "Aromático": 1}},
+    }},
+    _CAL + "Ocasiões de uso do briefing: deslocamentos pequenos e pontos de território (v4 vem só da intensidade)."))
 REGRAS_CRIACAO.append((
     "criacao_vocabulario", "linguagem",
     {"intensidade": {"suave": 2, "discreto": 2, "discreta": 2, "leve": 3, "moderado": 5, "moderada": 5,

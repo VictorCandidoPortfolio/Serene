@@ -154,10 +154,10 @@ def test_identidade_do_acorde_aponta_territorios(client, repertorio, nova_usuari
 def test_caminhos_da_referencia(client, repertorio, nova_usuaria):
     h, ids = repertorio
     ref = _post(client, "/referencias", {"nome": "Perfume Z", "familia_percebida": "Ambarado",
-                                         "notas_conhecidas": ["Bergamot", "Âmbar", "baunilha de Madagascar"]}, h)
+                                         "notas_conhecidas": ["Bergamot", "Âmbar", "xarope de unicórnio"]}, h)
     r = client.get(f"/referencias/{ref['id']}/caminhos", headers=h).json()
     assert {n["nota"] for n in r["notas_reconhecidas"]} == {"Bergamota", "Âmbar"}
-    assert r["notas_desconhecidas"] == ["baunilha de Madagascar"]
+    assert r["notas_desconhecidas"] == ["xarope de unicórnio"]
     assert "Cítrico" in r["familias_presentes"] and "Ambarado" in r["familias_ausentes"]
     assert r["vetor_estimado"]["v1"] is not None
     assert any("ESTIMATIVA" in a for a in r["avisos"])

@@ -8,6 +8,7 @@ Os demais services pessoais seguem o mesmo padrão:
    repertório sem confirmação da aluna.
 """
 
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -35,6 +36,17 @@ from app.schemas.essencias import (
 from app.services.motor import ContextoMotor, regras_obrigatorias
 
 PERCEPCOES_SIMPLES = PERCEPCOES
+
+
+@dataclass
+class EstimativaNome:
+    """Resultado de `estimar_pelo_nome` (nivel None = nome desconhecido na base geral)."""
+
+    nivel: str | None = None
+    nota: Any = None
+    familia: Any = None
+    percepcao: str | None = None
+    campos: dict[str, Any] | None = None
 
 # Campos que podem vir da referência; alterá-los numa essência vinculada
 # marca `editado_da_referencia`.
@@ -313,6 +325,46 @@ class EssenciasService:
             "knowledge_note_id": nota.id if nota else None,
             "editado_da_referencia": bool(nota is not None and not mantida),
         }
+
+    # ------------------------------------------- conhecimento geral pelo NOME
+    def estimar_pelo_nome(self, nome: str) -> "EstimativaNome":
+        """O que a base de conhecimento GERAL diz sobre um nome, sem gravar nada.
+
+        - "exata": nome (ou sinônimo) idêntico a uma matéria-prima conhecida -> perfil geral
+          (família + percepção da nota) já traduzido nos valores internos;
+        - "parecida": um nome contém o outro ("Flor de lavanda" × "Lavanda") -> só SUGESTÃO,
+          que a aluna precisa confirmar (não presumimos que sejam o mesmo produto);
+        - sem correspondência: nada (a informação é desconhecida; nada é inventado).
+
+        É conhecimento sobre o NOME, não sobre o produto específico que ela comprou.
+        """
+        if not hasattr(self, "_cache_notas"):
+            notas = {n.id: n for n in self.conhecimento.notas()}
+            self._cache_notas = (notas, [NotaRef(n.id, n.nome, tuple(n.sinonimos or ())) for n in notas.values()])
+        notas, refs = self._cache_notas
+        achadas = buscar_correspondencias(nome, refs, limite=1)
+        if not achadas:
+            return EstimativaNome()
+        nota = notas[achadas[0].nota_id]
+        territorios, regra = self._regras_simples()
+        familia = nota.family
+        percepcao = percepcao_de_v1(nota.v1_ref, regra)
+        nivel = "exata" if achadas[0].tipo == "exata" else "parecida"
+        campos = None
+        if nivel == "exata" and familia is not None and percepcao is not None:
+            campos = self._campos_derivados(
+                " ".join(nome.split()), familia, percepcao, nota, self._familias_da_base(), territorios, regra)
+        return EstimativaNome(nivel, nota, familia, percepcao, campos)
+
+    def aplicar_perfil_geral(self, essencia_id: int, nota: KnowledgeNote) -> Essencia:
+        """Registra na essência da aluna o perfil geral de uma nota (família + percepção da nota).
+
+        Usado ao SALVAR uma criação que já mostrou à aluna que o perfil geral foi usado. Passa
+        pela mesma edição do cadastro simples (recalcula os derivados e vincula a nota).
+        """
+        _, regra = self._regras_simples()
+        return self.atualizar(essencia_id, EssenciaUpdate(
+            familia=nota.family.nome, percepcao=percepcao_de_v1(nota.v1_ref, regra), aceitou_nota_id=nota.id))
 
     def opcoes_cadastro(self) -> OpcoesCadastroOut:
         """Chips do formulário: TODAS as famílias da base (na ordem dela) e as 3 percepções."""

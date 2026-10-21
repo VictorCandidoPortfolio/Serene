@@ -36,6 +36,10 @@ class SugestaoIn(EntradaModel):
     # Texto livre ("algo doce, floral e bem suave"): interpretado por palavras CADASTRADAS, sem IA.
     descricao: str | None = Field(default=None, max_length=600)
     perfume_referencia: str | None = Field(default=None, max_length=160)
+    # Famílias olfativas desejadas (nome ou slug de uma família da base); somam pontos ao alvo.
+    familias_desejadas: Annotated[list[str], Field(max_length=15)] = []
+    # Ocasião de uso (chave de `criacao_vocabulario/ocasioes`); ajusta o alvo um pouco.
+    ocasiao: str | None = Field(default=None, max_length=40)
     essencias_disponiveis: Literal["todas"] | Annotated[list[int], Field(max_length=MAX_IDS_ESSENCIAS)] = "todas"
     modo: ModoSugestao = "somente_minhas"
 
@@ -69,11 +73,41 @@ class EntendimentoOut(BaseModel):
     negados: list[str]
 
 
+class SugestaoDoNomeOut(BaseModel):
+    """O que a base geral sugere para um nome PARECIDO (a aluna confirma antes de valer)."""
+
+    nota_id: int
+    nota_nome: str
+    familia: str | None = None
+    percepcao: str | None = None
+
+
 class EssenciaPendenteOut(BaseModel):
     """Essência do repertório que ainda não pode entrar nos cálculos (falta Família e Percepção)."""
 
     id: int
     nome: str
+    sugestao: SugestaoDoNomeOut | None = None
+
+
+class EstimadaPeloNomeOut(BaseModel):
+    """Essência sem classificação cujo NOME bate com uma matéria-prima conhecida.
+
+    O motor usou o perfil GERAL dessa matéria-prima (conhecimento sobre o nome, não sobre o
+    produto específico da aluna) e diz isso na tela.
+    """
+
+    id: int
+    nome: str
+    nota_id: int
+    nota_nome: str
+    familia: str
+    percepcao: str
+
+
+class ResumoItemOut(BaseModel):
+    rotulo: str
+    valor: str
 
 
 class AcordeSugeridoOut(BaseModel):
@@ -108,6 +142,11 @@ class SugestaoOut(BaseModel):
     entendimento: EntendimentoOut | None = None
     # Essências da aluna que ficaram de fora por falta de dados (ela completa e refaz a proposta).
     essencias_sem_dados: list[EssenciaPendenteOut] = []
+    estimadas_pelo_nome: list[EstimadaPeloNomeOut] = []
+    # O briefing como foi entendido (só o que foi informado), em linguagem simples.
+    resumo_briefing: list[ResumoItemOut] = []
+    # Segurança por faixa etária (ex.: produto infantil não aprovado sem avaliação específica).
+    alertas_seguranca: list[str] = []
     tecnico: dict[str, Any] = {}
 
 
@@ -118,10 +157,20 @@ class OpcaoOut(BaseModel):
     rotulo: str
 
 
+class FaixaIdadeOut(BaseModel):
+    """Faixa de idade com o público a que pertence (infantil ou adolescente/adulto)."""
+
+    chave: str
+    rotulo: str
+    infantil: bool
+
+
 class OpcoesSugestaoOut(BaseModel):
     """Listas que alimentam o formulário (vêm do banco, não do front)."""
 
     emocoes: list[OpcaoOut]
     preferencias: list[OpcaoOut]
     generos: list[OpcaoOut]
-    faixas_idade: list[OpcaoOut]
+    faixas_idade: list[FaixaIdadeOut]
+    familias: list[OpcaoOut]
+    ocasioes: list[OpcaoOut]

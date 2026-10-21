@@ -177,8 +177,12 @@ def test_nenhuma_nota_de_conhecimento_aparece(client, nova_usuaria, db):
     assert nomes_base  # a base tem notas (Bergamota, Jasmim...)
     r = sugerir(client, h, **PEDIDO_LUNA)
     nomes = {i["nome"] for i in r["acorde"]["itens"]}
-    assert nomes <= {"Peônia", "Rosa"} and not (nomes & nomes_base)
-    assert "Bergamota" not in json.dumps(r, ensure_ascii=False)
+    # A base conhece MUITAS matérias-primas (inclusive Rosa e Peônia, que ela também tem), mas só
+    # entra o que está no repertório dela: nenhuma outra nota da base aparece.
+    assert nomes <= {"Peônia", "Rosa"}
+    texto = json.dumps({k: v for k, v in r.items() if k != "tecnico"}, ensure_ascii=False)
+    for outra in nomes_base - {"Peônia", "Rosa"}:
+        assert f'"{outra}"' not in texto, outra
 
 
 def test_opcoes_vem_do_banco(client, nova_usuaria):

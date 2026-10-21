@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, model_validator
 from app.schemas.common import EntradaModel, ListaEtiquetas
 from app.schemas.criacoes import AcordeItemIn
 from app.schemas.formulacao_pedido import Densidade, FormulacaoPedidoIn, Percentual, Positivo
-from app.schemas.sugestao import Genero, ModoSugestao, SugestaoOut
+from app.schemas.sugestao import SugestaoIn, SugestaoOut
 
 
 class ItemFormulacaoIn(AcordeItemIn):
@@ -42,23 +42,18 @@ class FormulacaoIn(FormulacaoPedidoIn):
         return self
 
 
-class PropostaIn(EntradaModel):
-    """Fluxo completo: produto + concentração + volume + descrição em linguagem natural.
+class PropostaIn(SugestaoIn):
+    """Fluxo completo: BRIEFING (os campos de `SugestaoIn`) + produto + concentração + volume.
 
+    O briefing (público e idade, gênero, intenção, famílias, preferências, intensidade, ocasião,
+    perfume de referência, essências) alimenta o motor; produto, concentração e volume alimentam a
+    calculadora. A descrição em linguagem natural é opcional e soma-se ao briefing.
     As essências consultadas são SEMPRE as da própria aluna.
     """
 
     produto: str = Field(min_length=1, max_length=60)
     concentracao_pct: Percentual
     volume_ml: Positivo = Decimal(100)
-    descricao: str = Field(min_length=1, max_length=600)
-    emocoes: ListaEtiquetas = []
-    preferencias: ListaEtiquetas = []
-    intensidade: float | None = Field(default=None, ge=0, le=10)
-    genero: Genero = "nao_definir"
-    idade: Annotated[int, Field(ge=0, le=120)] | Annotated[str, Field(max_length=40)] | None = None
-    essencias_disponiveis: Literal["todas"] | Annotated[list[int], Field(max_length=1000)] = "todas"
-    modo: ModoSugestao = "somente_minhas"
 
 
 class IngredienteOut(BaseModel):

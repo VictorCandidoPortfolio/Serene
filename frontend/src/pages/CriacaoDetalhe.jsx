@@ -97,10 +97,18 @@ export default function CriacaoDetalhe() {
           <Erro erro={erro} />
         </div>
 
+        {c.direcao?.alertas_seguranca?.map((a) => (
+          <p key={a} className="aviso aviso-forte">{a}</p>
+        ))}
         {c.direcao && (
           <section className="cartao detalhe-direcao">
             <span className="rotulo">Direção</span>
             <p>{c.direcao.texto}</p>
+            {c.direcao.resumo_briefing?.length > 0 && (
+              <small className="texto-suave">
+                {c.direcao.resumo_briefing.map((r) => `${r.rotulo}: ${r.valor}`).join(' · ')}
+              </small>
+            )}
             {c.direcao.vocabulario?.length > 0 && (
               <div className="chips">
                 {c.direcao.vocabulario.map((v) => (

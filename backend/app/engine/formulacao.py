@@ -270,7 +270,9 @@ def calcular_formulacao(
         ml = ml_ess[i.essencia_id]
         ingredientes.append(Ingrediente(
             "essencia", i.nome, i.essencia_id, i.peso, ROTULOS_PESO[i.peso],
-            q(ml / volume_q * CEM), pct_conc[i.essencia_id], ml,
+            # Participação no produto = concentração × % no concentrado (exata, não depende do
+            # arredondamento do ml); assim as essências somam exatamente a concentração escolhida.
+            q(conc * pct_conc[i.essencia_id] / CEM), pct_conc[i.essencia_id], ml,
             q(ml * i.densidade_g_ml) if i.densidade_g_ml is not None else None,
         ))
 

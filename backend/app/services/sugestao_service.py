@@ -19,7 +19,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import BusinessRuleError, KnowledgeUnavailableError, NotFoundError
-from app.core.text import chave
+from app.core.text import chave, normalizar
 from app.engine import criacao as motor
 from app.engine import linguagem
 from app.engine.axes import ROTULOS_PESO, EssenciaMotor
@@ -28,6 +28,10 @@ from app.models.repertorio import Essencia
 from app.repositories.repertorio import EssenciaRepository
 from app.schemas.sugestao import (
     AcordeSugeridoOut,
+    EstimadaPeloNomeOut,
+    FaixaIdadeOut,
+    ResumoItemOut,
+    SugestaoDoNomeOut,
     EntendimentoOut,
     EssenciaPendenteOut,
     IdentidadeOut,
@@ -38,6 +42,7 @@ from app.schemas.sugestao import (
     SugestaoIn,
     SugestaoOut,
 )
+from app.services.essencias_service import EssenciasService
 from app.services.motor import ContextoMotor, regras_obrigatorias
 
 TIPOS_REGRAS = (
@@ -89,11 +94,43 @@ class SugestaoService:
                     for k, v in regras[tipo].items()]
 
         faixas = sorted(regras["criacao_idade"].items(), key=lambda kv: float(kv[1].get("anos_de", 0)))
+        ocasioes = regras["criacao_vocabulario"].get("ocasioes", {}).get("opcoes", {})
         return OpcoesSugestaoOut(
             emocoes=lista("criacao_emocao"), preferencias=lista("criacao_preferencia"),
             generos=[OpcaoOut(chave=c, rotulo=r) for c, r in GENEROS],
-            faixas_idade=[OpcaoOut(chave=k, rotulo=str(v.get("rotulo", k))) for k, v in faixas],
+            faixas_idade=[FaixaIdadeOut(chave=k, rotulo=str(v.get("rotulo", k)), infantil=bool(v.get("infantil")))
+                          for k, v in faixas],
+            # Famílias olfativas desejadas: TODAS as da base (as mesmas do cadastro de essências).
+            familias=[OpcaoOut(chave=f.slug, rotulo=f.nome) for f in self.ctx.repo.familias()],
+            ocasioes=[OpcaoOut(chave=k, rotulo=str(v.get("rotulo", k))) for k, v in ocasioes.items()],
         )
+
+    def _resumo_briefing(self, entrada: SugestaoIn, pedido: "motor.Pedido", regras: dict, alvo_intensidade: float,
+                         desejadas: list[str], ocasioes: dict) -> list[ResumoItemOut]:
+        """O briefing como foi entendido: só o que foi informado, em linguagem simples."""
+        out: list[ResumoItemOut] = []
+
+        def add(rotulo: str, valor: str | None) -> None:
+            if valor:
+                out.append(ResumoItemOut(rotulo=rotulo, valor=valor))
+
+        add("Para quem", entrada.para_quem and entrada.para_quem.strip())
+        if pedido.faixa_idade:
+            r = regras["criacao_idade"][pedido.faixa_idade]
+            add("Público", "Infantil" if r.get("infantil") else "Adolescente ou adulto")
+            add("Faixa etária", str(r.get("rotulo", pedido.faixa_idade)).capitalize()
+                + (f" ({entrada.idade} anos)" if isinstance(entrada.idade, int) else ""))
+        add("Identidade olfativa", {"feminino": "Feminina", "masculino": "Masculina", "unissex": "Unissex"}.get(pedido.genero))
+        add("Intenção", ", ".join(linguagem.rotulos(list(pedido.emocoes), regras["criacao_emocao"])))
+        add("Famílias desejadas", ", ".join(desejadas))
+        add("Preferências", ", ".join(linguagem.rotulos(list(pedido.preferencias), regras["criacao_preferencia"])))
+        add("Intensidade", "suave" if alvo_intensidade <= 3.5 else "equilibrada" if alvo_intensidade <= 6.5 else "marcante")
+        if pedido.ocasiao and pedido.ocasiao in ocasioes:
+            add("Ocasião de uso", str(ocasioes[pedido.ocasiao].get("rotulo", pedido.ocasiao)))
+        # O perfume de referência é só uma pista registrada: não é copiado nem vira ingrediente.
+        add("Perfume de referência", entrada.perfume_referencia and f"{entrada.perfume_referencia.strip()} (apenas registro)")
+        add("Descrição", entrada.descricao and entrada.descricao.strip())
+        return out
 
     # ---------------------------------------------------------- repertório
     def _repertorio(self, pedido: SugestaoIn) -> list[Essencia]:
@@ -149,13 +186,34 @@ class SugestaoService:
         intensidade = (entrada.intensidade if entrada.intensidade is not None
                        else interp.intensidade if interp.intensidade is not None
                        else float(params["intensidade_padrao"]))
+        # Famílias olfativas desejadas: nome/slug de família da base -> grupo de cheiro que a cobre.
+        desejadas_chaves, desejadas_nomes, nao_rec_extra = [], [], []
+        for texto in entrada.familias_desejadas:
+            fam = self.ctx.familia_por_texto(texto)
+            grupo = motor.territorio_da_familia(fam.slug, territorios, self.ctx.hierarquia) if fam else None
+            if grupo is None:
+                nao_rec_extra.append(f"familia:{texto}")
+            elif grupo not in desejadas_chaves:
+                desejadas_chaves.append(grupo)
+                desejadas_nomes.append(fam.nome)
+        ocasioes = regras["criacao_vocabulario"].get("ocasioes", {}).get("opcoes", {})
+        ocasiao = chave(entrada.ocasiao) if entrada.ocasiao else None
+        if ocasiao and ocasiao not in ocasioes:
+            nao_rec_extra.append(f"ocasiao:{entrada.ocasiao}")
+            ocasiao = None
+        faixa_idade = self._faixa(entrada.idade, regras["criacao_idade"])
         pedido = motor.Pedido(
             genero=entrada.genero,
-            faixa_idade=self._faixa(entrada.idade, regras["criacao_idade"]),
+            faixa_idade=faixa_idade,
             emocoes=tuple(dict.fromkeys([*entrada.emocoes, *interp.emocoes])),
             preferencias=tuple(dict.fromkeys([*entrada.preferencias, *interp.preferencias])),
             intensidade=intensidade,
+            familias_desejadas=tuple(desejadas_chaves),
+            ocasiao=ocasiao,
         )
+        resumo = self._resumo_briefing(entrada, pedido, regras, intensidade, desejadas_nomes, ocasioes)
+        regra_idade = regras["criacao_idade"].get(faixa_idade) if faixa_idade else None
+        alertas_seguranca = [regra_idade["alerta_seguranca"]] if regra_idade and regra_idade.get("alerta_seguranca") else []
         entendimento = None
         if entrada.descricao and entrada.descricao.strip():
             entendimento = EntendimentoOut(
@@ -167,21 +225,47 @@ class SugestaoService:
         with regras_obrigatorias():
             alvo = motor.calcular_vetor_alvo(
                 pedido, regras["criacao_emocao"], regras["criacao_preferencia"],
-                regras["criacao_idade"], params,
+                regras["criacao_idade"], params, regras_ocasiao=ocasioes,
             )
         ordem = {k: t.ordem for k, t in territorios.items()}
         top = motor.pick_territorios(
             alvo.territorios, ordem, params, self._perfis_de_territorio(territorios), alvo.vetor)
 
         repertorio: list[EssenciaMotor] = [self.ctx.essencia_motor(e) for e in repertorio_db]
+        # Essência SEM classificação: se o NOME bate com uma matéria-prima do conhecimento geral,
+        # usa-se o perfil geral (e a tela diz isso). Nome só PARECIDO vira sugestão que a aluna
+        # confirma. Nada é gravado aqui.
+        ess_svc = EssenciasService(self.db, self.user_id)
+        estimadas: list[EstimadaPeloNomeOut] = []
+        sugestoes_parecidas: dict[int, SugestaoDoNomeOut] = {}
+        notas_por_id: dict[int, Any] = {}
+        minimo = int(params["min_eixos_proximidade"])
+        for i, (e_db, m) in enumerate(zip(repertorio_db, repertorio)):
+            if sum(1 for x in ("v1", "v2", "v3", "v4") if m.vetor.get(x) is not None) >= minimo:
+                continue
+            est = ess_svc.estimar_pelo_nome(e_db.nome)
+            if est.nivel == "exata" and est.campos:
+                c = est.campos
+                repertorio[i] = EssenciaMotor(
+                    id=m.id, nome=m.nome, familia=est.familia.nome, familia_chave=est.familia.slug,
+                    vetor={"v1": c["v1"], "v2": c["v2"], "v3": c["v3"], "v4": c["v4"], "v5": c["v5"], "v6": None},
+                    papel=c["papel"])
+                notas_por_id[m.id] = est.nota
+                estimadas.append(EstimadaPeloNomeOut(
+                    id=m.id, nome=m.nome, nota_id=est.nota.id, nota_nome=est.nota.nome,
+                    familia=est.familia.nome, percepcao=est.percepcao))
+            elif est.nivel == "parecida" and est.familia is not None and est.percepcao is not None:
+                sugestoes_parecidas[m.id] = SugestaoDoNomeOut(
+                    nota_id=est.nota.id, nota_nome=est.nota.nome, familia=est.familia.nome, percepcao=est.percepcao)
         territorio_de = {e.id: motor.territorio_da_familia(e.familia_chave, territorios, self.ctx.hierarquia)
                          for e in repertorio}
         papel_de = {e.id: e.papel for e in repertorio}
 
         avisos: list[str] = []
-        if alvo.nao_reconhecidos:
+        nao_reconhecidos = [*alvo.nao_reconhecidos, *nao_rec_extra]
+        if nao_reconhecidos:
             avisos.append("Não reconheci estes itens e não os usei: "
-                          + ", ".join(n.split(":", 1)[1] for n in alvo.nao_reconhecidos) + ".")
+                          + ", ".join(n.split(":", 1)[1] for n in nao_reconhecidos) + ".")
         tecnico: dict[str, Any] = {
             "vetor_alvo": alvo.vetor, "territorios": alvo.territorios, "dominantes": list(top),
             "faixa_idade": pedido.faixa_idade, "max_itens": alvo.max_itens,
@@ -191,7 +275,7 @@ class SugestaoService:
             return SugestaoOut(
                 status="pedido_incompleto",
                 mensagem=MSG_SEM_ENTENDER if entendimento else MSG_SEM_DIRECAO, identidade=None, acorde=None,
-                avisos=avisos, lacunas=[], dados_suficientes=False, tecnico=tecnico, entendimento=entendimento,
+                avisos=avisos, lacunas=[], dados_suficientes=False, tecnico=tecnico, entendimento=entendimento, resumo_briefing=resumo, alertas_seguranca=alertas_seguranca,
             )
 
         ident = motor.identidade(pedido, alvo, top, territorios, regras["criacao_emocao"],
@@ -200,7 +284,7 @@ class SugestaoService:
             return SugestaoOut(
                 status="insuficiente", mensagem=MSG_INSUFICIENTE,
                 identidade=IdentidadeOut(**ident), acorde=None, avisos=avisos, lacunas=[],
-                dados_suficientes=False, tecnico=tecnico, entendimento=entendimento,
+                dados_suficientes=False, tecnico=tecnico, entendimento=entendimento, resumo_briefing=resumo, alertas_seguranca=alertas_seguranca,
             )
 
         ranking_completo = motor.pontuar_essencias(
@@ -209,17 +293,17 @@ class SugestaoService:
         # pedido: fica de fora (e é citada UMA vez), em vez de entrar com nota inventada.
         ranking = [p for p in ranking_completo if p.nivel_proximidade != "sem_dado"]
         sem_dado = sorted(p.essencia.nome for p in ranking_completo if p.nivel_proximidade == "sem_dado")
-        pendentes = [EssenciaPendenteOut(id=p.essencia.id, nome=p.essencia.nome)
+        pendentes = [EssenciaPendenteOut(id=p.essencia.id, nome=p.essencia.nome,
+                                         sugestao=sugestoes_parecidas.get(p.essencia.id))
                      for p in sorted(ranking_completo, key=lambda x: x.essencia.nome) if p.nivel_proximidade == "sem_dado"]
         if not ranking:
             return SugestaoOut(
                 status="dados_insuficientes", mensagem=MSG_SEM_DADOS, identidade=IdentidadeOut(**ident),
-                acorde=None, avisos=avisos, lacunas=[], dados_suficientes=False, tecnico=tecnico, entendimento=entendimento,
+                acorde=None, avisos=avisos, lacunas=[], dados_suficientes=False, tecnico=tecnico, entendimento=entendimento, resumo_briefing=resumo, alertas_seguranca=alertas_seguranca,
                 essencias_sem_dados=pendentes,
             )
         if sem_dado:
-            avisos.append("Ficaram de fora por falta de características: " + ", ".join(sem_dado)
-                          + ". Abra cada uma em Essências e escolha Família e Percepção.")
+            avisos.append("Ficaram de fora por falta de dados (a proposta segue sem elas): " + ", ".join(sem_dado) + ".")
 
         relacoes, hierarquia = self.ctx.relacoes, self.ctx.hierarquia
         montagem = motor.montar_acorde(
@@ -230,6 +314,19 @@ class SugestaoService:
         tecnico["scores"] = {p.essencia.id: round(p.score, 4) for p in ranking}
 
         # ---- avisos e lacunas: cada causa uma vez; sempre categorias, nunca essências ----
+        # Nomes iguais, ou que resolvem para a MESMA matéria-prima do conhecimento geral (ex.: Baunilha e
+        # Vanilla), podem ser o mesmo produto cadastrado duas vezes. Só avisamos: quem decide é a aluna.
+        grupos_dup: dict[str, list[str]] = {}
+        for it in itens:
+            e = it.pontuada.essencia
+            est = notas_por_id.get(e.id)
+            if est is None:
+                r = ess_svc.estimar_pelo_nome(e.nome)
+                est = r.nota if r.nivel == "exata" else None
+            grupos_dup.setdefault(f"nota:{est.id}" if est is not None else f"nome:{normalizar(e.nome)}", []).append(e.nome)
+        for nomes_dup in grupos_dup.values():
+            if len(nomes_dup) > 1:
+                avisos.append(" e ".join(nomes_dup) + " parecem a mesma matéria-prima. Confira se são produtos diferentes.")
         if len(ranking) == 1 and not sem_dado:
             avisos.append("Seu repertório tem só uma essência: o acorde fica com pouca variedade.")
         # Cadastro simples: os valores são estimados (confiança baixa) e válidos. Não há aviso
@@ -291,7 +388,7 @@ class SugestaoService:
             status="ok", mensagem=None, identidade=IdentidadeOut(**ident), acorde=acorde,
             avisos=avisos, lacunas=lacunas,
             dados_suficientes=motor.dados_suficientes(montagem.fraco, montagem.escolhidas),
-            tecnico=tecnico, entendimento=entendimento, essencias_sem_dados=pendentes,
+            tecnico=tecnico, entendimento=entendimento, resumo_briefing=resumo, alertas_seguranca=alertas_seguranca, essencias_sem_dados=pendentes, estimadas_pelo_nome=estimadas,
         )
 
     def _perfis_de_territorio(self, territorios: dict[str, motor.Territorio]) -> dict[str, dict[str, float]]:

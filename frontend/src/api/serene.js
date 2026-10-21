@@ -76,6 +76,8 @@ export const criacoes = {
   atualizar: (id, dados) => request(`/criacoes/${id}`, { method: 'PUT', body: dados }),
   apagar: (id) => request(`/criacoes/${id}`, { method: 'DELETE' }),
   recomendacoes: (id) => request(`/criacoes/${id}/recomendacoes`),
+  // Opções do briefing (emoções, famílias, ocasiões, faixas de idade...), vindas do banco.
+  opcoesSugestao: () => request('/criacoes/sugerir/opcoes'),
 };
 
 export const acordes = {

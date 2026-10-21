@@ -236,3 +236,9 @@ REGRAS = [
 from app.seed.data_criacao import REGRAS_CRIACAO  # noqa: E402
 
 REGRAS = REGRAS + REGRAS_CRIACAO
+
+
+# Conhecimento olfativo geral (matérias-primas comuns, por nome). Camada compartilhada.
+from app.seed.data_conhecimento_geral import NOTAS_GERAIS  # noqa: E402
+
+NOTAS = NOTAS + NOTAS_GERAIS

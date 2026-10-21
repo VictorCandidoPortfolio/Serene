@@ -241,6 +241,30 @@ perfil (`perfis_olfativos.respostas`), a criação (`direcao`) e a versão 1 do 
   intensidade e da persistência de cada essência e deve ser validada em bancada.
 - O motor orienta a criação; **não prevê** como a mistura vai cheirar na pele.
 
+### Criar formulação: briefing → acordes → fórmula
+
+`POST /formulacoes/propor` recebe o **briefing** (os campos de `SugestaoIn`: `para_quem`, `idade` ou faixa, `genero`,
+`emocoes`, `familias_desejadas`, `preferencias`, `intensidade`, `ocasiao`, `perfume_referencia`, `descricao`,
+`essencias_disponiveis`, `modo`) **mais** `produto`, `concentracao_pct` e `volume_ml`. As opções do briefing vêm de
+`GET /criacoes/sugerir/opcoes` (banco). Fluxo no servidor:
+
+1. interpreta o briefing (chips + descrição em linguagem natural, sem IA) e monta o vetor-alvo e o placar de famílias;
+2. recupera **só** as essências da aluna;
+3. essência **sem classificação**: se o NOME é igual a uma matéria-prima do **conhecimento geral** (`knowledge_notes`, ~75 notas
+   iniciais em `app/seed/data_conhecimento_geral.py`) usa-se o perfil geral, dito na tela como "perfil geral, não confirmado
+   para o seu produto"; nome só **parecido** (ex.: "Flor de lavanda") vira sugestão que a aluna confirma; nome desconhecido
+   fica de fora e é listado (nada é inventado). Isso nunca bloqueia a proposta se houver outras essências com dados;
+4. seleciona candidatas, monta o acorde, define pesos e calcula a **fórmula** (concentrado = volume × concentração ÷ 100;
+   essências somam 100 % do concentrado; base por componentes);
+5. devolve resumo do briefing, direção, acorde com justificativa objetiva, fórmula, pendências técnicas e alertas.
+
+Quatro tipos de informação nunca se misturam: conhecimento geral (nome), informação confirmada do produto (ficha),
+avaliação sensorial da aluna e desconhecido. **Público infantil** (faixas marcadas `infantil` em `criacao_idade`) recebe sempre o
+alerta de segurança: a fórmula **não é aprovada** sem avaliação específica e documentação. Salvar (`POST /criacoes` com
+`sugestao` + `formulacao`) recalcula tudo no servidor e registra o perfil geral nas essências usadas.
+
+Ocasião de uso e "confiança" (emoção) são **novos** (não existiam no projeto); seus efeitos são pequenos e ficam em dados.
+
 ### Cadastro simples de essência (3 campos)
 
 A aluna informa **Nome, Família e Percepção** (Fria / Neutra / Quente). O servidor deduz o resto; o cliente

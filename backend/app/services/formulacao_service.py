@@ -142,6 +142,7 @@ class FormulacaoService:
         pedido: FormulacaoPedidoIn,
         pares: list[tuple[int, int]],
         densidades: dict[int, Decimal] | None = None,
+        estimadas_pelo_nome: frozenset[int] = frozenset(),
     ) -> FormulacaoOut:
         """Formula [(essencia_id, peso 1..3)] do repertório da usuária.
 
@@ -161,7 +162,8 @@ class FormulacaoService:
         saida = saida_de(r)
         if saida.valido:
             saida.pendencias = self._pendencias(
-                base_de_exemplo, [achadas[i] for i, _ in pares], saida.massa_total_g is None)
+                base_de_exemplo, [achadas[i] for i, _ in pares if i not in estimadas_pelo_nome],
+                saida.massa_total_g is None)
         return saida
 
     @staticmethod
@@ -215,12 +217,10 @@ class FormulacaoService:
         vem em `sem_formulacao` e nenhuma quantidade é inventada.
         """
         self._regra_do_produto(pedido.produto)   # falha cedo se o produto não existe
-        sugestao = SugestaoService(self.db, self.user_id).sugerir(SugestaoIn(
-            genero=pedido.genero, idade=pedido.idade, emocoes=pedido.emocoes,
-            preferencias=pedido.preferencias, intensidade=pedido.intensidade,
-            descricao=pedido.descricao, essencias_disponiveis=pedido.essencias_disponiveis,
-            modo=pedido.modo,
-        ))
+        # O briefing inteiro (público, idade, gênero, intenção, famílias, preferências, intensidade,
+        # ocasião, essências...) vai para o motor; produto/concentração/volume vão para a calculadora.
+        briefing = SugestaoIn(**pedido.model_dump(include=set(SugestaoIn.model_fields)))
+        sugestao = SugestaoService(self.db, self.user_id).sugerir(briefing)
         if sugestao.status != "ok" or sugestao.acorde is None:
             return PropostaOut(sugestao=sugestao, motivo_nao_salvar=sugestao.mensagem)
         if not sugestao.dados_suficientes:
@@ -230,7 +230,20 @@ class FormulacaoService:
             FormulacaoPedidoIn(produto=pedido.produto, volume_ml=pedido.volume_ml,
                                concentracao_pct=pedido.concentracao_pct),
             [(i.essencia_id, i.peso) for i in sugestao.acorde.itens],
+            estimadas_pelo_nome=frozenset(e.id for e in sugestao.estimadas_pelo_nome),
         )
+        # Pendências que vêm do briefing e da base geral (a fórmula em si não as conhece).
+        extras = list(sugestao.alertas_seguranca)
+        usadas = {e.id for e in sugestao.estimadas_pelo_nome}
+        no_acorde = [e for e in sugestao.estimadas_pelo_nome if e.id in {i.essencia_id for i in sugestao.acorde.itens}]
+        if no_acorde and usadas:
+            extras.append(
+                "Perfil GERAL usado (conhecimento sobre o nome, não confirmado para o seu produto): "
+                + ", ".join(e.nome if e.nome.strip().lower() == e.nota_nome.lower() else f"{e.nome} (como {e.nota_nome})"
+                            for e in no_acorde)
+                + ". Ao salvar, esse perfil é registrado nessas essências; você pode ajustá-las depois."
+            )
+        formulacao.pendencias = [*extras, *formulacao.pendencias]
         # Salvar como criação cria o acorde da versão 1, que exige 2 ou mais essências.
         n = len(sugestao.acorde.itens)
         pode = formulacao.valido and n >= 2
