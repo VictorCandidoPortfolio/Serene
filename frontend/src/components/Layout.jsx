@@ -64,9 +64,9 @@ function BarraLateral() {
 
       <div className="lateral-cartao">
         <strong>Nova ideia?</strong>
-        <small>Comece uma criação e monte o primeiro acorde.</small>
-        <button className="btn btn-pequeno btn-contorno" onClick={() => navigate('/criacoes?nova=1')}>
-          <Icon name="plus" size={16} /> Nova criação
+        <small>Descreva a fragrância e receba o acorde e a fórmula.</small>
+        <button className="btn btn-pequeno btn-contorno" onClick={() => navigate('/formulacao')}>
+          <Icon name="plus" size={16} /> Criar formulação
         </button>
       </div>
 

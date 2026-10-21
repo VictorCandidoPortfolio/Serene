@@ -213,7 +213,7 @@ REGRAS = [
     ("vetor_movimento", "mais_floral", {"delta": {"v6": 2.0}}, "mais floral"),
     # ------------------------------------------------------ pesos de score
     ("peso_score", "compatibilidade",
-     {"base": 0.5, "mesma_familia": 0.3, "sem_relacao": 0.0, "classico": 0.5,
+     {"base": 0.5, "classico": 0.5,
       "complementar": 0.3, "contraste": 0.1, "atencao": -0.3, "limiar_alerta": 0.4},
      "Pesos do score de compatibilidade entre famílias."),
     ("peso_score", "movimento",

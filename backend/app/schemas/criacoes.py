@@ -8,6 +8,7 @@ from pydantic import Field, field_validator, model_validator
 from app.engine.axes import NOMES_PESO
 from app.schemas.common import EdicaoModel, EntradaModel, LacunaOut, ORMModel, TextoLongo
 from app.schemas.outros import RespostasPerfil
+from app.schemas.formulacao_pedido import FormulacaoPedidoIn
 from app.schemas.sugestao import SugestaoIn
 
 StatusCriacao = Literal["rascunho", "em_ajuste", "aprovada", "arquivada"]
@@ -38,6 +39,8 @@ class CriacaoCreate(EntradaModel):
     intencao: RespostasPerfil | None = None
     referencia_id: int | None = Field(default=None, ge=1)
     sugestao: SugestaoIn | None = None
+    # Só com `sugestao`: produto/concentração/volume da fórmula da versão 1.
+    formulacao: FormulacaoPedidoIn | None = None
 
     @model_validator(mode="after")
     def _uma_origem(self) -> "CriacaoCreate":
@@ -45,6 +48,8 @@ class CriacaoCreate(EntradaModel):
                    if o is not None]
         if len(origens) > 1:
             raise ValueError("escolha só uma origem de direção: perfil, intenção, referência ou sugestão")
+        if self.formulacao is not None and self.sugestao is None:
+            raise ValueError("`formulacao` só vale junto com `sugestao`")
         return self
 
 
@@ -98,6 +103,8 @@ class AcordeCreate(EntradaModel):
     itens: list[AcordeItemIn] = Field(min_length=2, max_length=MAX_ITENS_ACORDE)
     # Opcional: o que mudou nesta versão e por quê (aparece no histórico).
     motivo: str | None = Field(default=None, max_length=300)
+    # Fórmula desta versão. Sem ela, a versão herda o pedido da anterior (se houver).
+    formulacao: FormulacaoPedidoIn | None = None
 
     @model_validator(mode="after")
     def _sem_repetidas(self) -> "AcordeCreate":
@@ -119,6 +126,7 @@ class AcordeOut(ORMModel):
     familia_resultante: str | None
     compatibilidade: dict[str, Any] | None
     motivo: str | None = None
+    formulacao: dict[str, Any] | None = None
     criado_em: datetime | None = None
 
 

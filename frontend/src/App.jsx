@@ -6,9 +6,9 @@ import Colecoes from './pages/Colecoes';
 import Conhecimento from './pages/Conhecimento';
 import Conta from './pages/Conta';
 import CriacaoDetalhe from './pages/CriacaoDetalhe';
-import CriarComLaboratorio from './pages/CriarComLaboratorio';
 import Criacoes from './pages/Criacoes';
 import Essencias from './pages/Essencias';
+import Formulacao from './pages/Formulacao';
 import Home from './pages/Home';
 import Login from './pages/Login';
 import Mapa from './pages/Mapa';
@@ -32,8 +32,8 @@ export default function App() {
         <Route index element={<Home />} />
         <Route path="essencias" element={<Essencias />} />
         <Route path="criacoes" element={<Criacoes />} />
-        <Route path="criacoes/laboratorio" element={<CriarComLaboratorio />} />
         <Route path="criacoes/:id" element={<CriacaoDetalhe />} />
+        <Route path="formulacao" element={<Formulacao />} />
         <Route path="perfis" element={<Perfis />} />
         <Route path="colecoes" element={<Colecoes />} />
         <Route path="conta" element={<Conta />} />

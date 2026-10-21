@@ -175,11 +175,9 @@ def test_reenvios_em_paralelo_respeitam_o_limite(client, db, monkeypatch):
 
 # --------------------------------------------------- entradas que davam 500
 @pytest.mark.parametrize("rota_criar, corpo_criar, rota_editar, campo", [
-    ("/essencias", {"nome": "X"}, "/essencias/{id}", "nome"),
-    ("/essencias", {"nome": "X"}, "/essencias/{id}", "confianca"),
-    ("/essencias", {"nome": "X"}, "/essencias/{id}", "tipo"),
-    ("/essencias", {"nome": "X"}, "/essencias/{id}", "origem"),
-    ("/essencias", {"nome": "X"}, "/essencias/{id}", "favorito"),
+    ("/essencias", {"nome": "Xx", "familia": "Floral", "percepcao": "neutra"}, "/essencias/{id}", "nome"),
+    ("/essencias", {"nome": "Xx", "familia": "Floral", "percepcao": "neutra"}, "/essencias/{id}", "familia"),
+    ("/essencias", {"nome": "Xx", "familia": "Floral", "percepcao": "neutra"}, "/essencias/{id}", "percepcao"),
     ("/criacoes", {"nome": "C"}, "/criacoes/{id}", "nome"),
     ("/criacoes", {"nome": "C"}, "/criacoes/{id}", "status"),
     ("/referencias", {"nome": "R"}, "/referencias/{id}", "nome"),
@@ -194,17 +192,9 @@ def test_null_em_campo_obrigatorio_e_422(c500, nova_usuaria, rota_criar, corpo_c
     assert campo in r.text
 
 
-def test_null_em_listas_continua_limpando(client, nova_usuaria):
-    h = nova_usuaria("l@exemplo.com")
-    e = client.post("/essencias", json={"nome": "X", "tags": ["a"]}, headers=h).json()
-    r = client.put(f"/essencias/{e['id']}", json={"tags": None}, headers=h)
-    assert r.status_code == 200 and r.json()["tags"] == []
-
-
 @pytest.mark.parametrize("rota, corpo", [
-    ("/essencias", {"nome": "x", "observacoes": "a" * 5001}),
-    ("/essencias", {"nome": "x", "tags": [f"t{i}" for i in range(31)]}),
-    ("/essencias", {"nome": "x", "descritores": ["a" * 61]}),
+    ("/essencias", {"nome": "x" * 201, "familia": "Floral", "percepcao": "neutra"}),
+    ("/essencias", {"nome": "xx", "familia": "F" * 121, "percepcao": "neutra"}),
     ("/criacoes", {"nome": "x", "objetivo": "a" * 5001}),
     ("/referencias", {"nome": "x", "notas_conhecidas": ["n"] * 51}),
     ("/perfis", {"respostas": {"emocoes": ["amor"], "lixo": "y" * 20_000}}),
@@ -231,9 +221,10 @@ def test_corpo_maior_que_1mb_e_413(client):
 def test_cota_por_conta(client, nova_usuaria, monkeypatch):
     monkeypatch.setattr(EssenciaRepository, "limite", 2)
     h = nova_usuaria("q@exemplo.com")
-    assert client.post("/essencias", json={"nome": "A"}, headers=h).status_code == 201
-    assert client.post("/essencias", json={"nome": "B"}, headers=h).status_code == 201
-    r = client.post("/essencias", json={"nome": "C"}, headers=h)
+    nova = lambda n: client.post("/essencias", json={"nome": n, "familia": "Floral", "percepcao": "neutra"}, headers=h)  # noqa: E731
+    assert nova("Alfa").status_code == 201
+    assert nova("Beta").status_code == 201
+    r = nova("Gama")
     assert r.status_code == 400 and r.json()["codigo"] == "limite_atingido"
 
 
@@ -306,21 +297,3 @@ def test_hash_antigo_do_passlib_continua_valendo():
 def test_senha_gigante_nao_derruba_o_login():
     assert verify_password("a" * 200, hash_password("Senha-forte-1")) is False
     assert verify_password("x", "hash-malformado") is False
-
-
-# --------------------------------------------- bugs de referência (essências)
-def test_aplicar_referencia_na_edicao_nao_apaga_correcao_da_aluna(client, nova_usuaria, nota_validada):
-    h = nova_usuaria("r@exemplo.com")
-    e = client.post("/essencias", json={"nome": "Cedro", "knowledge_note_id": nota_validada,
-                                        "aplicar_referencia": True}, headers=h).json()
-    client.put(f"/essencias/{e['id']}", json={"v2": 9}, headers=h)  # correção da aluna
-    r = client.put(f"/essencias/{e['id']}", json={"aplicar_referencia": True}, headers=h).json()
-    assert r["v2"] == 9 and r["editado_da_referencia"] is True
-
-
-def test_mesmo_valor_da_referencia_nao_marca_editado(client, nova_usuaria, nota_validada):
-    h = nova_usuaria("s@exemplo.com")
-    e = client.post("/essencias", json={"nome": "Cedro", "knowledge_note_id": nota_validada,
-                                        "aplicar_referencia": True}, headers=h).json()
-    r = client.put(f"/essencias/{e['id']}", json={"v2": e["v2"]}, headers=h).json()
-    assert r["editado_da_referencia"] is False

@@ -35,6 +35,7 @@ from app.routers import (
     conhecimento,
     criacoes,
     essencias,
+    formulacoes,
     mapa,
     perfil,
     referencias,
@@ -147,6 +148,7 @@ async def _erro_inesperado(request: Request, exc: Exception) -> JSONResponse:
 for _router in (
     auth.router,
     essencias.router,
+    formulacoes.router,
     criacoes.router,
     acordes.router,
     testes.router,

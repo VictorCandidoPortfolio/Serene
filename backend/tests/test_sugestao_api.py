@@ -9,6 +9,7 @@ import json
 import pytest
 
 from app.models.knowledge import KnowledgeNote
+from tests.util import essencia_antiga
 
 # nome: (família, v1, v2, v3, v4, (saída, coração, fundo))
 LUNA = {
@@ -34,7 +35,8 @@ def cadastrar(client, headers, repertorio=LUNA) -> dict[str, int]:
     """Cadastra as essências e devolve {nome: id}."""
     ids = {}
     for nome, (fam, v1, v2, v3, v4, (s, c, f)) in repertorio.items():
-        r = client.post("/essencias", headers=headers, json={
+        # Cadastro oficial (3 campos) + valores exatos gravados direto no banco (só testes).
+        r = essencia_antiga(client, headers, {
             "nome": nome, "familia": fam, "v1": v1, "v2": v2, "v3": v3, "v4": v4,
             "papel": {"saida": s, "coracao": c, "fundo": f}, "confianca": "media",
         })
@@ -67,7 +69,8 @@ def test_cenario_luna(client, luna):
     assert {i["essencia_id"] for i in itens} <= set(ids.values())  # só o repertório dela
     assert sorted(i["peso"] for i in itens)[-1] == 3
     assert {i["rotulo_peso"] for i in itens} <= {"Pouco", "Médio", "Bastante"}
-    assert all(i["papel_na_criacao"].startswith("Traz ") for i in itens)
+    assert all(i["papel_na_criacao"] is None or i["papel_na_criacao"].startswith("É do território") or "pediu" in i["papel_na_criacao"] or "criação" in i["papel_na_criacao"] for i in itens)
+    assert r["dados_suficientes"] is True and "confianca" not in r
     assert sum(r["acorde"]["piramide"].values()) == 100
     # Linguagem de consultora: nada de vetor/score na parte exibida.
     exibido = json.dumps({k: v for k, v in r.items() if k != "tecnico"}, ensure_ascii=False).lower()
@@ -206,3 +209,78 @@ def test_cliente_nao_envia_numeros(client, luna):
     h, _ = luna
     r = client.post("/criacoes/sugerir", headers=h, json={**PEDIDO_LUNA, "vetor_alvo": {"v1": 0}})
     assert r.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Confiabilidade: nada de resultado ou justificativa sem dado que o sustente
+# ---------------------------------------------------------------------------
+def test_pedido_sem_direcao_nao_inventa_identidade_nem_acorde(client, luna):
+    h, _ = luna
+    for pedido in ({}, {"intensidade": 2}, {"preferencias": ["suave"], "intensidade": 2},
+                   {"emocoes": ["inexistente"]}, {"idade": "bebe"}):
+        r = sugerir(client, h, **pedido)
+        assert r["status"] == "pedido_incompleto", pedido
+        assert r["identidade"] is None and r["acorde"] is None
+        assert "emoção ou preferência" in r["mensagem"]
+
+
+def test_essencia_sem_caracteristicas_nao_entra_e_e_citada_uma_vez(client, nova_usuaria):
+    h = nova_usuaria("sd@exemplo.com")
+    cadastrar(client, h, {"Peônia": LUNA["Peônia"], "Rosa": LUNA["Rosa"], "Pera": LUNA["Pera"]})
+    vazio = {"v1": None, "v2": None, "v3": None, "v4": None, "v5": None, "papel": None}
+    r0 = essencia_antiga(client, h, {"nome": "Mistério", "familia": None, **vazio})
+    r1 = essencia_antiga(client, h, {"nome": "Enigma", "familia": "Floral", **vazio})
+    assert r0.status_code == r1.status_code == 201
+    r = sugerir(client, h, **PEDIDO_LUNA)
+    assert {"Mistério", "Enigma"}.isdisjoint({i["nome"] for i in r["acorde"]["itens"]})
+    ficaram = [a for a in r["avisos"] if "Ficaram de fora" in a]
+    assert len(ficaram) == 1 and "Mistério" in ficaram[0] and "Enigma" in ficaram[0]
+
+
+def test_repertorio_todo_sem_caracteristicas_nao_gera_acorde(client, nova_usuaria):
+    h = nova_usuaria("sd2@exemplo.com")
+    for nome in ("Um", "Dois"):
+        essencia_antiga(client, h, {"nome": nome, "familia": "Floral", "v1": None, "v2": None, "v3": None,
+                                    "v4": None, "v5": None, "papel": None})
+    r = sugerir(client, h, **PEDIDO_LUNA)
+    assert r["status"] == "dados_insuficientes" and r["acorde"] is None
+    assert r["dados_suficientes"] is False and "Classifique" in r["mensagem"]
+    assert r["avisos"] == []  # a orientação está na mensagem; não se repete
+
+
+def test_avisos_nao_se_repetem(client, luna):
+    h, _ = luna
+    for pedido in (PEDIDO_LUNA, {**PEDIDO_LUNA, "modo": "mostrar_lacunas"}):
+        r = sugerir(client, h, **pedido)
+        assert len(r["avisos"]) == len(set(r["avisos"]))
+        msgs = [l["mensagem"] for l in r["lacunas"]]
+        assert len(msgs) == len(set(msgs))
+
+
+def test_piramide_so_com_papel_informado(client, nova_usuaria):
+    h = nova_usuaria("pir@exemplo.com")
+    sem_papel = {k: (v[0], v[1], v[2], v[3], v[4], (0, 0, 0)) for k, v in LUNA.items()}
+    for nome, (fam, v1, v2, v3, v4, _) in sem_papel.items():
+        essencia_antiga(client, h, {"nome": nome, "familia": fam, "v1": v1, "v2": v2, "v3": v3, "v4": v4,
+                                    "v5": None, "papel": None})
+    r = sugerir(client, h, **PEDIDO_LUNA)
+    assert r["acorde"]["piramide"] is None
+    assert all("Abre" not in (i["papel_na_criacao"] or "") for i in r["acorde"]["itens"])
+
+
+def test_compatibilidade_avulsa_sem_relacao_nao_mostra_porcentagem(client, nova_usuaria):
+    h = nova_usuaria("cp@exemplo.com")
+    ids = cadastrar(client, h, {"Sândalo": LUNA["Sândalo"], "Baunilha": LUNA["Baunilha"]})
+    r = client.post("/essencias/compatibilidade", headers=h, json={"essencia_ids": list(ids.values())})
+    assert r.status_code == 200
+    corpo = r.json()
+    assert corpo["score"] is None and corpo["pares"] == []
+    assert len(corpo["alertas"]) == 1 and "Sem relação cadastrada" in corpo["alertas"][0]
+
+
+def test_compatibilidade_com_relacao_cadastrada_calcula_e_marca_base_de_exemplo(client, nova_usuaria):
+    h = nova_usuaria("cp2@exemplo.com")
+    ids = cadastrar(client, h, {"Bergamota": LUNA["Bergamota"], "Peônia": LUNA["Peônia"]})
+    corpo = client.post("/essencias/compatibilidade", headers=h, json={"essencia_ids": list(ids.values())}).json()
+    assert isinstance(corpo["score"], int) and corpo["pares_avaliados"] == 1
+    assert corpo["base_exemplo"] is True  # relações do seed ainda são de exemplo

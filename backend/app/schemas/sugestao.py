@@ -12,8 +12,9 @@ from app.schemas.common import EntradaModel, ListaEtiquetas
 
 Genero = Literal["feminino", "masculino", "unissex", "nao_definir"]
 ModoSugestao = Literal["somente_minhas", "mostrar_lacunas"]
-Confianca = Literal["alta", "media", "baixa"]
-StatusSugestao = Literal["ok", "insuficiente"]
+# ok: identidade + acorde. insuficiente: repertorio vazio. dados_insuficientes: ha essencias, mas
+# nenhuma com caracteristicas para comparar. pedido_incompleto: nenhuma emocao/preferencia com efeito.
+StatusSugestao = Literal["ok", "insuficiente", "dados_insuficientes", "pedido_incompleto"]
 MAX_IDS_ESSENCIAS = 1000
 
 
@@ -30,7 +31,10 @@ class SugestaoIn(EntradaModel):
     idade: Annotated[int, Field(ge=0, le=120)] | Annotated[str, Field(max_length=40)] | None = None
     emocoes: ListaEtiquetas = []
     preferencias: ListaEtiquetas = []
-    intensidade: float = Field(default=5, ge=0, le=10)
+    # None = usa a palavra de intensidade da descrição, se houver; senão o padrão do banco.
+    intensidade: float | None = Field(default=None, ge=0, le=10)
+    # Texto livre ("algo doce, floral e bem suave"): interpretado por palavras CADASTRADAS, sem IA.
+    descricao: str | None = Field(default=None, max_length=600)
     perfume_referencia: str | None = Field(default=None, max_length=160)
     essencias_disponiveis: Literal["todas"] | Annotated[list[int], Field(max_length=MAX_IDS_ESSENCIAS)] = "todas"
     modo: ModoSugestao = "somente_minhas"
@@ -52,7 +56,17 @@ class ItemSugeridoOut(BaseModel):
     nome: str
     peso: int
     rotulo_peso: str
-    papel_na_criacao: str
+    # So fatos calculados; sem fato que sustente, vem vazio e a interface nao mostra.
+    papel_na_criacao: str | None = None
+
+
+class EntendimentoOut(BaseModel):
+    """O que o laboratório entendeu da descrição (para a aluna conferir)."""
+
+    emocoes: list[str]
+    preferencias: list[str]
+    intensidade: float | None
+    negados: list[str]
 
 
 class AcordeSugeridoOut(BaseModel):
@@ -61,6 +75,8 @@ class AcordeSugeridoOut(BaseModel):
     itens: list[ItemSugeridoOut]
     familia_resultante: str | None
     piramide: dict[str, int] | None
+    # Função de cada essência na composição, SÓ pelo papel que a aluna informou.
+    funcoes: dict[str, list[str]] = {}
     explicacao: str
 
 
@@ -81,7 +97,8 @@ class SugestaoOut(BaseModel):
     acorde: AcordeSugeridoOut | None
     avisos: list[str]
     lacunas: list[LacunaSugestaoOut]
-    confianca: Confianca
+    dados_suficientes: bool
+    entendimento: EntendimentoOut | None = None
     tecnico: dict[str, Any] = {}
 
 

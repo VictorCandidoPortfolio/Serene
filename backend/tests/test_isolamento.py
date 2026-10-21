@@ -13,6 +13,7 @@ import pytest
 
 from app.models.repertorio import Essencia
 from app.repositories.repertorio import AcordeRepository, EssenciaRepository
+from tests.util import essencia_antiga
 
 
 @pytest.fixture()
@@ -26,8 +27,9 @@ def cenario(client, nova_usuaria):
         assert r.status_code == 201, r.text
         return r.json()
 
-    e1 = post("/essencias", {"nome": "Bergamota", "familia": "Cítrico", "v1": 2, "v2": 1, "v3": 3, "v4": 6})
-    e2 = post("/essencias", {"nome": "Jasmim", "familia": "Floral", "v1": 6, "v2": 5, "v3": 6, "v4": 7})
+    e1 = essencia_antiga(client, a, {"nome": "Bergamota", "familia": "Cítrico", "v1": 2, "v2": 1, "v3": 3, "v4": 6},
+                         "Cítrico", "fria").json()
+    e2 = essencia_antiga(client, a, {"nome": "Jasmim", "familia": "Floral", "v1": 6, "v2": 5, "v3": 6, "v4": 7}).json()
     perfil = post("/perfis", {"respostas": {"emocoes": ["amor"], "publico": "teen"}})
     criacao = post("/criacoes", {"nome": "Primavera", "perfil_id": perfil["id"]})
     acorde = post(
@@ -238,7 +240,7 @@ def test_b_nao_passa_ids_de_a_em_essencias_disponiveis(client, cenario_sugestao)
     r = client.post("/criacoes/sugerir", json={**_pedido(), "essencias_disponiveis": alheios}, headers=c["b"])
     assert r.status_code == 404
     # misturar id próprio com id alheio também é recusado por inteiro
-    proprio = client.post("/essencias", json={"nome": "Minha"}, headers=c["b"]).json()["id"]
+    proprio = essencia_antiga(client, c["b"], {"nome": "Minha"}).json()["id"]
     r = client.post("/criacoes/sugerir", json={**_pedido(), "essencias_disponiveis": [proprio, alheios[0]]},
                     headers=c["b"])
     assert r.status_code == 404

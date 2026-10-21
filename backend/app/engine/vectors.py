@@ -7,7 +7,7 @@ na pirâmide (saída/coração/fundo) e a família dominante.
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
-from app.engine.axes import CAMADAS, EIXOS, EssenciaMotor
+from app.engine.axes import CAMADAS, EIXOS, ROTULOS_EIXOS, EssenciaMotor
 
 
 @dataclass(frozen=True)
@@ -33,7 +33,9 @@ class ResultadoAcorde:
     avisos: list[str] = field(default_factory=list)
 
 
-def calcular_acorde(itens: Sequence[tuple[EssenciaMotor, int]]) -> ResultadoAcorde:
+def calcular_acorde(
+    itens: Sequence[tuple[EssenciaMotor, int]], cobertura_minima: float | None = None
+) -> ResultadoAcorde:
     """Calcula vetor, papel e família resultante de um acorde.
 
     Média ponderada pelo peso relativo, eixo a eixo, IGNORANDO essências sem
@@ -43,6 +45,11 @@ def calcular_acorde(itens: Sequence[tuple[EssenciaMotor, int]]) -> ResultadoAcor
 
     Args:
         itens: pares (essência da usuária, peso relativo 1..3).
+        cobertura_minima: fração (0..1) do peso do acorde que precisa ter
+            dado para um eixo (ou a pirâmide) ser exibido. Abaixo disso o eixo
+            fica `None`: um valor calculado com 10 % do acorde seria
+            apresentado como se descrevesse o acorde todo. `None` = sem corte
+            (uso interno do motor de ajuste). O valor vem de `peso_score/validacao`.
 
     Returns:
         ResultadoAcorde.
@@ -64,22 +71,31 @@ def calcular_acorde(itens: Sequence[tuple[EssenciaMotor, int]]) -> ResultadoAcor
             round(sum(v * p for v, p in com_dado) / peso_com_dado, 2) if peso_com_dado else None
         )
 
+    if cobertura_minima is not None:
+        for eixo in EIXOS:
+            if vetor[eixo] is not None and cobertura[eixo] < cobertura_minima:
+                vetor[eixo] = None
     eixos_sem_dado = [e for e in EIXOS if vetor[e] is None]
-    avisos = [
-        f"Nenhuma essência deste acorde tem valor em {eixo}; o eixo ficou sem cálculo."
-        for eixo in eixos_sem_dado
-    ]
 
-    # Papel: soma ponderada por camada, depois normaliza para somar 1.
+    # Papel: soma ponderada por camada, depois normaliza para somar 1. Só vale
+    # se as essências com papel informado cobrem o mínimo do peso do acorde.
     com_papel = [(e.papel, p) for e, p in itens if e.papel]
+    cobertura_papel = sum(p for _, p in com_papel) / peso_total
     papel: dict[str, float] | None = None
-    if com_papel:
+    if com_papel and (cobertura_minima is None or cobertura_papel >= cobertura_minima):
         bruto = {c: sum(float(pp.get(c) or 0) * p for pp, p in com_papel) for c in CAMADAS}
         soma = sum(bruto.values())
         if soma > 0:
             papel = {c: round(v / soma, 3) for c, v in bruto.items()}
-    if len(com_papel) < len(itens):
-        avisos.append("Algumas essências não têm papel na pirâmide informado.")
+
+    # UM aviso só, listando tudo o que ficou sem base (e não um por eixo).
+    faltam = [ROTULOS_EIXOS[e][0] for e in eixos_sem_dado]
+    if papel is None:
+        faltam.append("papel na pirâmide")
+    avisos = (
+        [f"Sem dados suficientes para calcular: {', '.join(faltam)}. Classifique as essências do acorde."]
+        if faltam else []
+    )
 
     # Família dominante: soma de pesos por família. Empate: a primeira que
     # aparece no acorde, para o resultado ser determinístico.

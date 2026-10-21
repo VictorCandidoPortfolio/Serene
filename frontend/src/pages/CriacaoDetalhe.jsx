@@ -4,6 +4,7 @@ import { acordes, conhecimento, criacoes, essencias, testes } from '../api/seren
 import { useApi } from '../lib/useApi';
 import { CAMADAS, EIXOS, NOME_PESO, PESOS, STATUS, data, delta, pct, rotulo } from '../lib/format';
 import ResultadoCompatibilidade from '../components/Compatibilidade';
+import FormulaDaVersao from '../components/FormulaDaVersao';
 import Gauge from '../components/Gauge';
 import Icon from '../components/Icon';
 import { useConfirmar } from '../components/Confirmar';
@@ -183,6 +184,8 @@ export default function CriacaoDetalhe() {
           )}
         </section>
 
+        {acorde && <FormulaDaVersao key={acorde.id} acorde={acorde} criacaoId={id} onNovaVersao={versoes.reload} />}
+
         <section className="detalhe-testes">
           <div className="secao-cabeca">
             <h3 className="secao-titulo">Testes</h3>
@@ -242,15 +245,19 @@ export default function CriacaoDetalhe() {
 
 function ResultadoAcorde({ acorde, alvo, criacaoId, onNovaVersao }) {
   const compat = acorde.compatibilidade;
-  const avisos = [...(acorde.vetor?.avisos || []), ...(compat?.alertas || [])];
+  const avisos = [...new Set([...(acorde.vetor?.avisos || []), ...(compat?.alertas || [])])];
+  const paresAvaliados = (compat?.pares || []).filter((p) => typeof p.score === 'number');
 
   return (
     <>
       <div className="resultado-grade">
         <div className="cartao-amarelo resultado-amarelo">
-          <h2>{acorde.familia_resultante || 'Família indefinida'}</h2>
+          {acorde.familia_resultante && <h2>{acorde.familia_resultante}</h2>}
           {compat && typeof compat.score === 'number' && (
             <Gauge valor={compat.score / 100} rotulo="Compatibilidade" detalhe={`versão ${acorde.versao}`} />
+          )}
+          {compat?.base_exemplo && typeof compat.score === 'number' && (
+            <small className="texto-suave">Calculada com relações de exemplo, ainda não validadas.</small>
           )}
           <Linhas itens={acorde.itens.map((i) => [i.nome, NOME_PESO[i.peso] || i.peso])} />
         </div>
@@ -264,10 +271,10 @@ function ResultadoAcorde({ acorde, alvo, criacaoId, onNovaVersao }) {
               <Linhas itens={CAMADAS.map((c) => [c.nome, pct(acorde.papel[c.chave])])} />
             </>
           )}
-          {compat?.pares?.length > 0 && (
+          {paresAvaliados.length > 0 && (
             <>
               <span className="rotulo">Por que combina</span>
-              {compat.pares.map((p, i) => (
+              {paresAvaliados.map((p, i) => (
                 <p key={i} className="texto-suave">
                   <Pill>{p.tipo_relacao}</Pill> {p.explicacao}
                 </p>
@@ -517,25 +524,22 @@ function IdentidadeAcorde({ acorde, criacaoId }) {
   const ident = useApi(() => acordes.identidade(criacaoId, acorde.id), [acorde.id]);
   if (!ident.data) return null;
   const { territorios, avisos } = ident.data;
+  // Sem território nem orientação a dar, a seção não aparece.
+  if (!territorios.length && !avisos.length) return null;
+  // Sem porcentagem: ela vinha de uma distância sobre vetores de exemplo, não de uma medida válida.
   return (
     <div className="cartao">
       <span className="rotulo">Identidade desta versão</span>
-      {territorios.length ? (
+      {territorios.length > 0 && (
         <ul className="eixos">
           {territorios.map((t) => (
             <li key={t.chave}>
-              <div className="eixo-topo">
-                <span>{t.nome}</span>
-                <span className="eixo-valor">{t.proximidade}%</span>
-              </div>
-              <div className="eixo-trilho">
-                <div className="eixo-barra" style={{ width: `${t.proximidade}%` }} />
-              </div>
-              <small className="texto-suave">{t.explicacao}</small>
+              <strong>{t.nome}</strong>
+              <small className="texto-suave"> {t.explicacao}</small>
             </li>
           ))}
         </ul>
-      ) : null}
+      )}
       {avisos.map((a, i) => (
         <p key={i} className="texto-suave">{a}</p>
       ))}

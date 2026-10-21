@@ -1,6 +1,6 @@
 """Fluxo ponta a ponta pela API: cadastro → reconhecimento → acorde → ajuste → teste → coleção."""
 
-from tests.util import VALORES_DA_ALUNA
+from tests.util import VALORES_DA_ALUNA, essencia_antiga
 
 
 def _post(client, url, json, h, esperado=201):
@@ -9,55 +9,22 @@ def _post(client, url, json, h, esperado=201):
     return r.json()
 
 
-def test_reconhecimento_sugere_mas_nao_aplica_sozinho(client, nova_usuaria):
+def test_sugestao_de_classificacao_antiga_continua_so_sugerindo(client, nova_usuaria):
     h = nova_usuaria("r@exemplo.com")
-    e = _post(client, "/essencias", {"nome": "bergamot"}, h)
-    # Nada aplicado automaticamente...
-    assert e["knowledge_note_id"] is None and e["familia"] is None and e["v1"] is None
-    assert e["confianca"] == "baixa"
-    # ...mas a sugestão veio.
-    sug = e["sugestoes_referencia"][0]
+    sug = client.get("/essencias/sugestao-classificacao", params={"nome": "bergamot"}, headers=h).json()[0]
     assert sug["nome"] == "Bergamota" and sug["correspondencia"] == "exata"
-
     # A nota da base é de EXEMPLO: a sugestão traz a marca, o aviso e só a classificação.
     assert sug["ilustrativa"] is True and sug["v1"] is None and sug["papel"] is None
     assert any("EXEMPLO" in a for a in sug["avisos"])
-
-    # A aluna confirma, informando o v4 dela. Só a classificação vem da nota;
-    # o exemplo nunca vira "ficha técnica" nem copia número para a essência.
-    e2 = _post(
-        client, "/essencias",
-        {"nome": "Bergamota Fornecedor X", "knowledge_note_id": sug["nota_id"],
-         "aplicar_referencia": True, "v4": 4},
-        h,
-    )
-    assert e2["familia"] == "Cítrico" and e2["v1"] is None and e2["v4"] == 4
-    assert e2["origem"] == "estimado" and e2["confianca"] == "baixa"
-    assert e2["editado_da_referencia"] is False and e2["sugestoes_referencia"] == []
-
-    # Referência composta/baixa confiança vem com aviso.
     avisos = client.get("/essencias/sugestao-classificacao", params={"nome": "ambar"}, headers=h).json()
     assert avisos and len(avisos[0]["avisos"]) >= 2
-
-
-def test_nota_validada_copia_numeros_e_marca_edicao(client, nova_usuaria, nota_validada):
-    """Quando a base oficial entrar (ilustrativo=False), aplicar a referência copia os números."""
-    h = nova_usuaria("v@exemplo.com")
-    e = _post(client, "/essencias", {"nome": "Cedro", "knowledge_note_id": nota_validada,
-                                     "aplicar_referencia": True}, h)
-    assert e["v2"] == 8 and e["origem"] == "tecnico" and e["confianca"] == "alta"
-    assert e["editado_da_referencia"] is False
-    # Editar um valor vindo da referência marca a essência como editada.
-    r = client.put(f"/essencias/{e['id']}", json={"v2": 9}, headers=h).json()
-    assert r["editado_da_referencia"] is True
+    assert client.get("/essencias", headers=h).json() == []   # sugerir nunca grava
 
 
 def test_fluxo_criacao_acorde_ajuste_teste_colecao(client, nova_usuaria):
     h = nova_usuaria("fluxo@exemplo.com")
-    jasmim = _post(client, "/essencias", {"nome": "Jasmim", "knowledge_note_id": 3,
-                                          "aplicar_referencia": True, **VALORES_DA_ALUNA["Jasmim"]}, h)
-    cedro = _post(client, "/essencias", {"nome": "Cedro", "knowledge_note_id": 4,
-                                         "aplicar_referencia": True, **VALORES_DA_ALUNA["Cedro"]}, h)
+    jasmim = essencia_antiga(client, h, {"nome": "Jasmim", **VALORES_DA_ALUNA["Jasmim"]}).json()
+    cedro = essencia_antiga(client, h, {"nome": "Cedro", **VALORES_DA_ALUNA["Cedro"]}, "Amadeirado").json()
 
     perfil = _post(client, "/perfis", {"respostas": {
         "emocoes": ["amor", "serenidade"], "territorios": ["acolhimento"], "publico": "teen",
@@ -83,8 +50,7 @@ def test_fluxo_criacao_acorde_ajuste_teste_colecao(client, nova_usuaria):
     assert "Bergamota" not in ajuste["lacuna"]["mensagem"]
 
     # Com uma bergamota no repertório, o ajuste passa a ser possível.
-    berg = _post(client, "/essencias", {"nome": "Bergamota", "knowledge_note_id": 1,
-                                        "aplicar_referencia": True, **VALORES_DA_ALUNA["Bergamota"]}, h)
+    berg = essencia_antiga(client, h, {"nome": "Bergamota", **VALORES_DA_ALUNA["Bergamota"]}, "Cítrico", "fria").json()
     ajuste = _post(client, f"{url}/{v1['id']}/ajuste", {"movimento": "mais_fresco"}, h, 200)
     assert ajuste["alcancavel"] is True
     assert ajuste["sugestoes"][0]["essencia_id"] == berg["id"]
@@ -134,8 +100,8 @@ def test_fluxo_criacao_acorde_ajuste_teste_colecao(client, nova_usuaria):
 
 def test_criacao_arquivada_nao_recebe_versoes(client, nova_usuaria):
     h = nova_usuaria("arq@exemplo.com")
-    a = _post(client, "/essencias", {"nome": "A", "familia": "Floral"}, h)
-    b = _post(client, "/essencias", {"nome": "B", "familia": "Cítrico"}, h)
+    a = essencia_antiga(client, h, {"nome": "Alfa", "familia": "Floral"}).json()
+    b = essencia_antiga(client, h, {"nome": "Beta", "familia": "Cítrico"}, "Cítrico", "fria").json()
     c = _post(client, "/criacoes", {"nome": "Velha", "status": "arquivada"}, h)
     r = client.post(f"/criacoes/{c['id']}/acordes", headers=h,
                     json={"itens": [{"essencia_id": a["id"], "peso": 1}, {"essencia_id": b["id"], "peso": 1}]})
@@ -144,7 +110,7 @@ def test_criacao_arquivada_nao_recebe_versoes(client, nova_usuaria):
 
 def test_acorde_valida_entrada(client, nova_usuaria):
     h = nova_usuaria("val@exemplo.com")
-    a = _post(client, "/essencias", {"nome": "A"}, h)
+    a = essencia_antiga(client, h, {"nome": "Alfa"}).json()
     c = _post(client, "/criacoes", {"nome": "C"}, h)
     url = f"/criacoes/{c['id']}/acordes"
     um_item = {"itens": [{"essencia_id": a["id"], "peso": 1}]}

@@ -32,6 +32,7 @@ from app.core.text import chave
 from app.engine.axes import (
     CAMADAS,
     ESCALA_MAX,
+    ROTULOS_EIXOS,
     ROTULOS_PESO,
     EssenciaMotor,
     clamp,
@@ -54,7 +55,7 @@ CHAVES_SCORE = (
     "bonus_presenca_por_item", "v5_por_territorio", "v5_por_distancia",
     "familia_segunda_fracao", "coerencia_ideal", "coerencia_sigma", "peso_coerencia",
     "peso_complementaridade", "peso_risco", "risco_atencao", "margem_isolada",
-    "lacuna_eixo_minima", "repertorio_minimo_confianca",
+    "lacuna_eixo_minima", "cobertura_minima", "tolerancia_eixo", "intensidade_padrao",
 )
 
 
@@ -63,16 +64,16 @@ CHAVES_SCORE = (
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)
 class Territorio:
-    """Território olfativo (família de gosto) e suas frases-base."""
+    """Território olfativo (família de gosto) e seu vocabulário curto."""
 
     chave: str
     nome: str
     familias: tuple[str, ...]
     adjetivo: str
-    frase: str
-    frase_feminino: str
     atributo: str
     ordem: int
+    # Perfil típico do grupo (v2, v3, v4 e papel em %), usado pelo cadastro simples de essência.
+    perfil: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -104,6 +105,10 @@ class ResultadoAlvo:
     max_itens: int
     emocoes: list[str] = field(default_factory=list)
     preferencias: list[str] = field(default_factory=list)
+    # Alguma emoção/preferência reconhecida deslocou um eixo (que não o v4) ou
+    # pontuou um território. Sem isso o alvo é só o ponto neutro de partida, e
+    # descrevê-lo como "direção" seria inventar.
+    tem_direcao: bool = False
 
 
 @dataclass(frozen=True)
@@ -116,7 +121,6 @@ class EssenciaPontuada:
     proximidade: float
     no_territorio_alvo: bool
     nivel_proximidade: str  # "muito" | "razoavel" | "distante" | "sem_dado"
-    baixa_confianca: bool
 
 
 @dataclass(frozen=True)
@@ -224,9 +228,8 @@ def carregar_territorios(regras: Mapping[str, Mapping[str, Any]]) -> dict[str, T
     for k, v in regras.items():
         out[k] = Territorio(
             chave=k, nome=v["nome"], familias=tuple(v.get("familias", [])),
-            adjetivo=v.get("adjetivo", v["nome"].lower()), frase=v.get("frase", ""),
-            frase_feminino=v.get("frase_feminino") or v.get("frase", ""),
-            atributo=v.get("atributo", ""), ordem=int(v.get("ordem", 99)),
+            adjetivo=v.get("adjetivo", v["nome"].lower()),
+            atributo=v.get("atributo", ""), ordem=int(v.get("ordem", 99)), perfil=v.get("perfil") or {},
         )
     return out
 
@@ -266,14 +269,18 @@ def calcular_vetor_alvo(
     emocoes_ok: list[str] = []
     preferencias_ok: list[str] = []
 
+    direcao = [False]
+
     def aplicar(regra: Mapping[str, Any]) -> None:
         for eixo, delta in (regra.get("target") or {}).items():
             if eixo == "v4" or eixo not in v:
                 continue  # v4 vem da intensidade pedida
             v[eixo] = clamp(v[eixo] + float(delta))
+            direcao[0] = direcao[0] or bool(delta)
         for nome_t, pontos in (regra.get("terr") or {}).items():
             k = chave(nome_t)
             territorios[k] = territorios.get(k, 0.0) + float(pontos)
+            direcao[0] = direcao[0] or bool(pontos)
 
     for bruto, regras, tipo, ok in (
         *((e, regras_emocao, "emocao", emocoes_ok) for e in pedido.emocoes),
@@ -304,7 +311,7 @@ def calcular_vetor_alvo(
     return ResultadoAlvo(
         vetor={e: round(v[e], 4) for e in EIXOS_ALVO}, territorios=territorios,
         nao_reconhecidos=nao_reconhecidos, max_itens=max_itens,
-        emocoes=emocoes_ok, preferencias=preferencias_ok,
+        emocoes=emocoes_ok, preferencias=preferencias_ok, tem_direcao=direcao[0],
     )
 
 
@@ -361,7 +368,6 @@ def pick_territorios(
 def pontuar_essencias(
     repertorio: Sequence[EssenciaMotor],
     territorio_de: Mapping[int, str | None],
-    confianca_de: Mapping[int, str],
     alvo: Mapping[str, float],
     territorios: Mapping[str, float],
     top: Sequence[str],
@@ -400,7 +406,6 @@ def pontuar_essencias(
         out.append(EssenciaPontuada(
             essencia=e, territorio=t, score=score, proximidade=prox, no_territorio_alvo=no_alvo,
             nivel_proximidade=nivel,
-            baixa_confianca=sem_dado or confianca_de.get(e.id, "baixa") == "baixa",
         ))
     out.sort(key=lambda p: (-round(p.score, 9), p.essencia.id))
     return out
@@ -430,7 +435,10 @@ def vetor_do_acorde(
     for eixo in ("v1", "v2", "v3", "v4"):
         com = [(i.essencia.vetor[eixo], p) for i, p in itens if i.essencia.vetor.get(eixo) is not None]
         pw = sum(p for _, p in com)
-        vetor[eixo] = sum(x * p for x, p in com) / pw if pw else None
+        total = sum(p for _, p in itens)
+        # Eixo com pouca cobertura não descreve o acorde: fica sem valor.
+        ok = pw and pw / total >= float(params["cobertura_minima"])
+        vetor[eixo] = sum(x * p for x, p in com) / pw if ok else None
     if vetor["v4"] is not None:
         vetor["v4"] = clamp(vetor["v4"] + (len(itens) - 1) * float(params["bonus_presenca_por_item"]))
 
@@ -444,7 +452,8 @@ def vetor_do_acorde(
     # Pirâmide: só entram essências com papel informado.
     com_papel = [(i.essencia.papel, p) for i, p in itens if i.essencia.papel]
     papel = None
-    if com_papel:
+    cobre = sum(p for _, p in com_papel) / sum(p for _, p in itens)
+    if com_papel and cobre >= float(params["cobertura_minima"]):
         bruto = {c: sum(float(pp.get(c) or 0) * p for pp, p in com_papel) for c in CAMADAS}
         soma = sum(bruto.values())
         if soma > 0:
@@ -576,7 +585,10 @@ def montar_acorde(
     p_prox, p_comp = float(params["peso_proximidade"]), float(params["peso_compat"])
     neutra = float(params["proximidade_neutra"])
     escolhidas = [ranking[0]]
-    fraco = ranking[0].score < float(params["score_fraco"])
+    # Só se afirma "fraco" com dado: score baixo por falta de característica
+    # (proximidade neutra) seria dizer que não combina sem saber.
+    fraco = (ranking[0].score < float(params["score_fraco"])
+             and ranking[0].nivel_proximidade != "sem_dado")
 
     def com_peso_2(grupo: Sequence[EssenciaPontuada]) -> list[tuple[EssenciaPontuada, int]]:
         return [(g, 2) for g in grupo]
@@ -698,53 +710,76 @@ def identidade(
         frases[-1] += "."
     elif gosta:
         frases.append(f"Você indicou preferência por algo {_lista_natural(gosta)}.")
-    else:
-        frases.append("Você não indicou emoções nem preferências; segui só a intensidade pedida.")
-    frases.append(f"Isso tende a favorecer uma fragrância {direcao[:1].lower() + direcao[1:].rstrip('.')}.")
+    # (sem emoções nem preferências o service nem chega aqui: ver `tem_direcao`)
+    frases.append(f"A direção calculada a partir disso é: {direcao[:1].lower() + direcao[1:]}")
     return {"nome_sugerido": nome, "personalidade": personalidade, "direcao": direcao,
             "por_que": " ".join(frases)}
+
+
+def _eixos_proximos(vetor: Mapping[str, float | None], alvo: Mapping[str, float],
+                    tolerancia: float) -> list[str]:
+    """Rótulos dos eixos (v1–v4) em que `vetor` está a até `tolerancia` do alvo.
+
+    Só eixos COM valor entram: nada de afirmar proximidade onde falta dado.
+    """
+    return [ROTULOS_EIXOS[e][0] for e in EIXOS_COMPARADOS
+            if vetor.get(e) is not None and abs(vetor[e] - alvo[e]) <= tolerancia]
 
 
 def explicar_essencia(
     pontuada: EssenciaPontuada,
     papel_essencia: Mapping[str, float] | None,
     territorios: Mapping[str, Territorio],
-    genero: str,
+    top: Sequence[str],
+    alvo: Mapping[str, float],
+    params: Mapping[str, Any],
     vocab: Mapping[str, Any],
-) -> str:
-    """"Traz {frase do território}. {frase do papel dominante}"
+) -> str | None:
+    """Por que esta essência está no acorde — SÓ com fatos calculados.
 
-    O gênero feminino só troca a FRASE do Floral ("delicadeza e feminilidade");
-    nunca restringe a família (regra 5). A frase do papel entra quando um papel
-    da própria essência passa de `papel_dominante_acima_de` (50 %).
+    Cada frase só existe se houver dado que a sustente:
+    - território: a família cadastrada pela aluna cai num território conhecido;
+    - proximidade: eixos (com valor) a até `tolerancia_eixo` do que foi pedido;
+    - papel: um papel da pirâmide que a aluna informou e que passa de 50 %.
+    Sem nenhum desses fatos devolve `None` (a interface não mostra nada), em
+    vez de uma frase genérica. Sem texto por "personalidade" da família.
     """
+    frases: list[str] = []
     t = territorios.get(pontuada.territorio) if pontuada.territorio else None
     if t is not None:
-        frase = t.frase_feminino if genero == "feminino" else t.frase
-        texto = f"Traz {frase}."
-    else:
-        texto = str(vocab["frase_sem_territorio"])
+        pedido = " (o que você pediu)" if pontuada.territorio in top else ""
+        frases.append(f"É do território {t.nome}{pedido}.")
+    perto = _eixos_proximos(pontuada.essencia.vetor, alvo, float(params["tolerancia_eixo"]))
+    if perto:
+        frases.append(f"Está próxima do que você pediu em {_lista_natural(perto)}.")
     if papel_essencia:
         limiar = float(vocab.get("papel_dominante_acima_de", 0.5))
         dominante = max(CAMADAS, key=lambda c: (float(papel_essencia.get(c) or 0), -CAMADAS.index(c)))
         if float(papel_essencia.get(dominante) or 0) > limiar:
-            texto += " " + vocab["frase_papel"][dominante]
-    if pontuada.baixa_confianca and pontuada.nivel_proximidade == "sem_dado":
-        texto += " Ainda não tenho informação suficiente para afirmar isso com segurança."
-    return texto
+            frases.append(vocab["frase_papel"][dominante])
+    return " ".join(frases) or None
 
 
 def explicacao_do_acorde(nomes: Sequence[str], alvo: ResultadoAlvo,
-                         regras_emocao: Mapping[str, Mapping[str, Any]]) -> str:
-    """"Escolhi X porque você pediu Y" (tendência, não promessa)."""
+                         regras_emocao: Mapping[str, Mapping[str, Any]],
+                         vetor_acorde: Mapping[str, float | None],
+                         params: Mapping[str, Any]) -> str:
+    """"Escolhi X porque você pediu Y" + onde o conjunto de fato chega perto.
+
+    A segunda frase só aparece se o vetor do acorde, calculado, estiver dentro
+    da tolerância do alvo em algum eixo. Nenhuma promessa sobre a pele.
+    """
     pediu = [regras_emocao[k].get("rotulo", k) for k in alvo.emocoes]
-    por_que = f" porque você pediu {_lista_natural(pediu)}" if pediu else " pela direção que você indicou"
-    return (f"Escolhi {_lista_natural(list(nomes))}{por_que}. "
-            "A combinação tende a favorecer essa direção; como ela vai se comportar na pele só o teste mostra.")
+    texto = f"Escolhi {_lista_natural(list(nomes))}"
+    texto += f" porque você pediu {_lista_natural(pediu)}." if pediu else "."
+    perto = _eixos_proximos(vetor_acorde, alvo.vetor, float(params["tolerancia_eixo"]))
+    if perto:
+        texto += f" Em conjunto, ficam próximas do que você pediu em {_lista_natural(perto)}."
+    return texto
 
 
 # ---------------------------------------------------------------------------
-# Lacunas e confiança
+# Lacunas
 # ---------------------------------------------------------------------------
 def lacunas_de_territorio(
     top: Sequence[str],
@@ -798,19 +833,11 @@ def descrever_delta(delta: Mapping[str, float]) -> str:
     return _lista_natural([descrever_direcao(e, d) for e, d in delta.items()])
 
 
-def nivel_de_confianca(n_repertorio: int, fraco: bool, escolhidas: Sequence[EssenciaPontuada],
-                       params: Mapping[str, Any]) -> str:
-    """"alta" | "media" | "baixa" — honestidade sobre o quanto o resultado é firme.
+def dados_suficientes(fraco: bool, escolhidas: Sequence[EssenciaPontuada]) -> bool:
+    """True quando o acorde se apoia em dados: há essências e a melhor combina.
 
-    baixa: acorde fraco, repertório com menos de 3 essências ou metade (ou
-    mais) das escolhidas sem informação suficiente. alta: repertório amplo
-    (`repertorio_minimo_confianca`), nenhuma escolhida de baixa confiança.
+    Substitui o antigo selo "confiança alta/média/baixa", cujos limiares eram
+    inventados. Aqui só há um fato verificável. Os motivos de uma limitação
+    aparecem nos avisos e nas lacunas, não em um selo.
     """
-    if not escolhidas:
-        return "baixa"
-    baixas = sum(1 for e in escolhidas if e.baixa_confianca)
-    if fraco or n_repertorio < 3 or baixas * 2 >= len(escolhidas):
-        return "baixa"
-    if n_repertorio >= int(params["repertorio_minimo_confianca"]) and baixas == 0:
-        return "alta"
-    return "media"
+    return bool(escolhidas) and not fraco

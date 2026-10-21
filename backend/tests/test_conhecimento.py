@@ -1,6 +1,8 @@
 """Fase 1: conhecimento olfativo (famílias, características, doçura, marca de exemplo)."""
 
 import pytest
+
+from tests.util import essencia_antiga
 from sqlalchemy.exc import IntegrityError, OperationalError
 
 from app.models.knowledge import KnowledgeDescriptor, KnowledgeNote
@@ -100,8 +102,8 @@ def test_docura_em_tres_niveis_nas_notas_e_check_no_banco(client, h, db):
 def test_piramide_e_descritiva_e_a_essencia_pode_ficar_sem_nivel(client, h):
     niveis = _get(client, "/conhecimento/funcoes", h)
     assert [n["slug"] for n in niveis] == ["saida", "coracao", "fundo"]
-    # "Não sei ainda": uma essência sem papel definido é aceita e o motor segue funcionando.
-    e = client.post("/essencias", json={"nome": "Sem nível"}, headers=h)
+    # Essência ANTIGA (cadastro detalhado) sem papel definido continua aceita pelo motor.
+    e = essencia_antiga(client, h, {"nome": "Sem nível", "papel": None})
     assert e.status_code == 201 and e.json()["papel"] is None
     assert client.get("/essencias/lacunas", headers=h).status_code == 200
 
@@ -119,12 +121,3 @@ def test_seed_e_idempotente_e_nao_duplica_familias(client, h, db):
     assert len(_get(client, "/conhecimento/familias", h)) == 15  # 14 principais + Floral Branco
 
 
-def test_nota_de_exemplo_nao_copia_numeros_para_a_essencia(client, h):
-    sug = client.get("/essencias/sugestao-classificacao", params={"nome": "jasmim"}, headers=h).json()[0]
-    e = client.post("/essencias", json={
-        "nome": "Jasmim", "knowledge_note_id": sug["nota_id"], "aplicar_referencia": True,
-    }, headers=h).json()
-    assert e["familia"] == "Floral" and e["subfamilia"] == "Floral Branco"
-    assert e["descritores"] == ["cremoso"]
-    assert all(e[eixo] is None for eixo in ("v1", "v2", "v3", "v4", "v5", "v6")) and e["papel"] is None
-    assert e["origem"] == "estimado" and e["confianca"] == "baixa"

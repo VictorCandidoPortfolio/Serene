@@ -47,6 +47,9 @@ export const essencias = {
   compatibilidade: (ids) =>
     request('/essencias/compatibilidade', { method: 'POST', body: { essencia_ids: ids } }),
   sugestoes: (nome) => request('/essencias/sugestao-classificacao', { params: { nome } }),
+  // Cadastro simples: chips (famílias e percepções, do banco) e reconhecimento pelo nome.
+  opcoes: () => request('/essencias/opcoes'),
+  sugestaoPorNome: (nome) => request('/essencias/sugestao', { params: { nome } }),
 };
 
 export const referencias = {
@@ -73,22 +76,32 @@ export const criacoes = {
   atualizar: (id, dados) => request(`/criacoes/${id}`, { method: 'PUT', body: dados }),
   apagar: (id) => request(`/criacoes/${id}`, { method: 'DELETE' }),
   recomendacoes: (id) => request(`/criacoes/${id}/recomendacoes`),
-  // Motor de criação ("O que você quer criar?"): prévia que não grava nada.
-  opcoesSugestao: () => request('/criacoes/sugerir/opcoes'),
-  sugerir: (pedido) => request('/criacoes/sugerir', { method: 'POST', body: pedido }),
 };
 
 export const acordes = {
   listar: (criacaoId) => request(`/criacoes/${criacaoId}/acordes`),
   // `motivo` (opcional): o que mudou nesta versão e por quê.
-  criar: (criacaoId, itens, motivo) =>
-    request(`/criacoes/${criacaoId}/acordes`, { method: 'POST', body: { itens, motivo: motivo || null } }),
+  // `formulacao` (opcional): {produto, concentracao_pct, volume_ml, proporcoes_pct}. Sem ela a versão
+  // herda a fórmula da anterior.
+  criar: (criacaoId, itens, motivo, formulacao) =>
+    request(`/criacoes/${criacaoId}/acordes`, {
+      method: 'POST',
+      body: { itens, motivo: motivo || null, ...(formulacao ? { formulacao } : {}) },
+    }),
   identidade: (criacaoId, acordeId) => request(`/criacoes/${criacaoId}/acordes/${acordeId}/identidade`),
   ajuste: (criacaoId, acordeId, movimento) =>
     request(`/criacoes/${criacaoId}/acordes/${acordeId}/ajuste`, {
       method: 'POST',
       body: { movimento },
     }),
+};
+
+// Calculadora de formulação (quantidades finais). Os limites de cada produto vêm do banco.
+export const formulacoes = {
+  produtos: () => request('/formulacoes/produtos'),
+  calcular: (dados) => request('/formulacoes/calcular', { method: 'POST', body: dados }),
+  // Descrição em linguagem natural -> acorde (só repertório) -> fórmula, se houver fundamento.
+  propor: (dados) => request('/formulacoes/propor', { method: 'POST', body: dados }),
 };
 
 export const testes = {

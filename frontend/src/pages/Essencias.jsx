@@ -3,11 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { conhecimento, criacoes, essencias, referencias } from '../api/serene';
 import { useApi } from '../lib/useApi';
 import { CAMADAS, EIXOS, camadaDominante, data, normalizar, pct, rotulo, sensacao } from '../lib/format';
-import ClassificacaoEssencia, {
-  CLASSIFICACAO_VAZIA,
-  classificacaoDe,
-  classificacaoParaApi,
-} from '../components/ClassificacaoEssencia';
+import FormEssencia from '../components/FormEssencia';
 import ResultadoCompatibilidade from '../components/Compatibilidade';
 import Icon from '../components/Icon';
 import { useConfirmar } from '../components/Confirmar';
@@ -21,9 +17,6 @@ const ABAS = [
   { chave: 'lacunas', nome: 'Lacunas' },
   { chave: 'referencias', nome: 'Referências' },
 ];
-
-/** Sem nenhum eixo informado, o motor não consegue usar a essência. */
-export const semClassificacao = (e) => EIXOS.every((x) => e[x.chave] === null || e[x.chave] === undefined);
 
 export default function Essencias() {
   const [params, setParams] = useSearchParams();
@@ -79,8 +72,6 @@ export default function Essencias() {
 
       {novaAberta && (
         <NovaEssencia
-          familias={familias.data || []}
-          descritores={descritores.data || []}
           onClose={() => mudarParam('nova', null)}
           onSalva={lista.reload}
         />
@@ -100,8 +91,6 @@ export default function Essencias() {
       {editando && (
         <EditarEssencia
           essencia={editando}
-          familias={familias.data || []}
-          descritores={descritores.data || []}
           onClose={() => setEditando(null)}
           onSalva={(nova) => {
             setEditando(null);
@@ -133,14 +122,13 @@ function Repertorio({ lista, corDaFamilia, onAbrir, onNova }) {
               <Icon name="drop" size={19} />
             </Avatar>
             <span className="item-texto">
-              <strong>
-                {e.nome} {e.favorito && <Icon name="heart" size={13} filled className="coracao" />}
-              </strong>
-              <small>
-                {[e.familia || 'Sem família', camadaDominante(e.papel)].filter(Boolean).join(' · ')}
-              </small>
+              <strong>{e.nome}</strong>
+              <span className="chips">
+                {e.familia && <Pill>{e.familia}</Pill>}
+                {e.percepcao && <Pill tom="branco">{NOME_PERCEPCAO[e.percepcao]}</Pill>}
+              </span>
             </span>
-            {semClassificacao(e) ? <Pill tom="amarelo">Classificar</Pill> : <Icon name="chevron" size={18} />}
+            <Icon name="chevron" size={18} />
           </button>
         </li>
       ))}
@@ -148,217 +136,45 @@ function Repertorio({ lista, corDaFamilia, onAbrir, onNova }) {
   );
 }
 
-function NovaEssencia({ familias, descritores, onClose, onSalva }) {
-  const [form, setForm] = useState({ nome: '', familia: '', fornecedor: '' });
-  // Classificação completa já no cadastro (opcional): abre o mesmo formulário da edição.
-  const [detalhar, setDetalhar] = useState(false);
-  const [classificacao, setClassificacao] = useState(CLASSIFICACAO_VAZIA);
-  const [sugestoes, setSugestoes] = useState([]);
-  const [escolhida, setEscolhida] = useState(null);
-  const [criada, setCriada] = useState(null);
-  const [erro, setErro] = useState(null);
-  const [enviando, setEnviando] = useState(false);
+const NOME_PERCEPCAO = { fria: 'Fria', neutra: 'Neutra', quente: 'Quente' };
 
-  // Busca referências na base de conhecimento enquanto a aluna digita (nada é gravado).
-  useEffect(() => {
-    const nome = form.nome.trim();
-    if (nome.length < 3) {
-      setSugestoes([]);
-      return;
-    }
-    const t = setTimeout(() => {
-      essencias.sugestoes(nome).then(setSugestoes).catch(() => setSugestoes([]));
-    }, 350);
-    return () => clearTimeout(t);
-  }, [form.nome]);
-
-  async function salvar(e) {
-    e.preventDefault();
-    setErro(null);
-    setEnviando(true);
-    try {
-      let corpo = { nome: form.nome.trim() };
-      if (escolhida) {
-        corpo.knowledge_note_id = escolhida.nota_id;
-        corpo.aplicar_referencia = true;
-        if (form.fornecedor.trim()) corpo.fornecedor = form.fornecedor.trim();
-      } else if (detalhar) {
-        // Só o que foi informado: campos vazios ficam de fora (a API entende "não sei").
-        const dados = classificacaoParaApi(classificacao);
-        corpo = { ...corpo, ...Object.fromEntries(Object.entries(dados).filter(([, v]) => v !== null && !(Array.isArray(v) && !v.length))) };
-      } else {
-        if (form.familia) corpo.familia = form.familia;
-        if (form.fornecedor.trim()) corpo.fornecedor = form.fornecedor.trim();
-      }
-      const resp = await essencias.criar(corpo);
-      onSalva();
-      // Sem referência escolhida, a API ainda pode ter achado correspondências: oferecemos aplicar depois.
-      if (!escolhida && resp.sugestoes_referencia?.length) setCriada(resp);
-      else onClose();
-    } catch (err) {
-      setErro(err);
-    } finally {
-      setEnviando(false);
-    }
-  }
-
-  async function aplicar(sug) {
-    setEnviando(true);
-    try {
-      await essencias.atualizar(criada.id, { knowledge_note_id: sug.nota_id, aplicar_referencia: true });
-      onSalva();
-      onClose();
-    } catch (err) {
-      setErro(err);
-      setEnviando(false);
-    }
-  }
-
-  if (criada) {
-    return (
-      <Sheet titulo="Referência encontrada" onClose={onClose}>
-        <p className="texto-suave">
-          “{criada.nome}” foi salva. Encontramos na base de conhecimento uma nota que pode corresponder a ela.
-          Aplicar preenche família, papel e eixos com os valores da referência.
-        </p>
-        {criada.sugestoes_referencia.map((s) => (
-          <CartaoSugestao key={s.nota_id} sugestao={s} />
-        ))}
-        <Erro erro={erro} />
-        <div className="botoes-duplos">
-          <button className="btn btn-contorno" onClick={onClose}>
-            Deixar assim
-          </button>
-          <button className="btn btn-primario" disabled={enviando} onClick={() => aplicar(criada.sugestoes_referencia[0])}>
-            Aplicar referência
-          </button>
-        </div>
-      </Sheet>
-    );
-  }
-
+/** Cadastro: 3 campos (Nome, Família, Percepção). Ver components/FormEssencia.jsx. */
+function NovaEssencia({ onClose, onSalva }) {
   return (
     <Sheet titulo="Nova essência" onClose={onClose}>
-      <form onSubmit={salvar} className="form">
-        <Campo rotulo="Nome">
-          <input
-            autoFocus
-            value={form.nome}
-            onChange={(e) => {
-              setForm({ ...form, nome: e.target.value });
-              setEscolhida(null);
-            }}
-            placeholder="Ex.: Bergamota"
-            required
-          />
-        </Campo>
-
-        {sugestoes.length > 0 && (
-          <div className="sugestoes">
-            <span className="rotulo">Referências da base de conhecimento</span>
-            {sugestoes.map((s) => (
-              <CartaoSugestao
-                key={s.nota_id}
-                sugestao={s}
-                ativo={escolhida?.nota_id === s.nota_id}
-                onClick={() => setEscolhida(escolhida?.nota_id === s.nota_id ? null : s)}
-              />
-            ))}
-            <small className="texto-suave">Toque para usar os dados da referência. Nada é aplicado sem sua confirmação.</small>
-          </div>
-        )}
-
-        {!escolhida && detalhar && (
-          <ClassificacaoEssencia
-            valor={classificacao}
-            onChange={setClassificacao}
-            familias={familias}
-            descritoresBase={descritores}
-          />
-        )}
-        {!escolhida && (
-          <button type="button" className="link alinhar-esquerda" onClick={() => setDetalhar(!detalhar)}>
-            {detalhar ? 'Cadastrar só o básico' : 'Informar características sensoriais agora (opcional)'}
-          </button>
-        )}
-        {!escolhida && !detalhar && (
-          <Campo rotulo="Família (opcional)">
-            <select value={form.familia} onChange={(e) => setForm({ ...form, familia: e.target.value })}>
-              <option value="">Não sei ainda</option>
-              {familias.map((f) => (
-                <option key={f.id} value={f.nome}>
-                  {f.nome}
-                </option>
-              ))}
-            </select>
-          </Campo>
-        )}
-        {(escolhida || !detalhar) && (
-          <Campo rotulo="Fornecedor (opcional)">
-            <input value={form.fornecedor} onChange={(e) => setForm({ ...form, fornecedor: e.target.value })} />
-          </Campo>
-        )}
-
-        <Erro erro={erro} />
-        <div className="botoes-duplos">
-          <button type="button" className="btn btn-contorno" onClick={onClose}>
-            Cancelar
-          </button>
-          <button type="submit" className="btn btn-primario" disabled={enviando}>
-            {enviando ? 'Salvando…' : 'Adicionar'}
-          </button>
-        </div>
-      </form>
+      <FormEssencia
+        onClose={onClose}
+        onSalva={() => {
+          onSalva();
+          onClose();
+        }}
+      />
     </Sheet>
   );
 }
 
-function CartaoSugestao({ sugestao: s, ativo, onClick }) {
-  const Tag = onClick ? 'button' : 'div';
-  return (
-    <Tag type={onClick ? 'button' : undefined} className={`sugestao ${ativo ? 'ativo' : ''}`} onClick={onClick}>
-      <span className="item-texto">
-        <strong>{s.nome}</strong>
-        <small>
-          {[s.familia, s.subfamilia, camadaDominante(s.papel)].filter(Boolean).join(' · ')}
-        </small>
-        {s.ilustrativa && s.avisos?.length > 0 && <small className="texto-suave">{s.avisos[0]}</small>}
-      </span>
-      {s.ilustrativa && <Exemplo />}
-      {ativo ? <Icon name="check" /> : <Pill>{s.correspondencia}</Pill>}
-    </Tag>
-  );
-}
-
+/** Detalhe simples: nome, família e percepção. Nada técnico. */
 function DetalheEssencia({ essencia: e, cor, onClose, onMudou, onEditar }) {
   const confirmar = useConfirmar();
   const [erro, setErro] = useState(null);
   const [ocupado, setOcupado] = useState(false);
 
-  async function executar(acao) {
+  const apagar = async () => {
+    if (!(await confirmar(`“${e.nome}” sairá do seu repertório. Versões de acordes antigas continuam mostrando o nome.`, { titulo: 'Excluir essência', botao: 'Excluir' }))) return;
     setErro(null);
     setOcupado(true);
     try {
-      await acao();
-    } catch (err) {
-      setErro(err);
-    } finally {
-      setOcupado(false);
-    }
-  }
-
-  const favoritar = () => executar(async () => onMudou(await essencias.atualizar(e.id, { favorito: !e.favorito })));
-  const apagar = async () => {
-    if (!(await confirmar(`“${e.nome}” sairá do seu repertório. Versões de acordes antigas continuam mostrando o nome.`, { titulo: 'Excluir essência', botao: 'Excluir' }))) return;
-    executar(async () => {
       await essencias.apagar(e.id);
       onMudou(null);
       onClose();
-    });
+    } catch (err) {
+      setErro(err);
+      setOcupado(false);
+    }
   };
 
   return (
-    <Sheet titulo="Detalhe da essência" onClose={onClose} topo={<div className="faixa-topo" style={{ background: cor }} />}>
+    <Sheet titulo="Essência" onClose={onClose} topo={<div className="faixa-topo" style={{ background: cor }} />}>
       <div className="item cabeca-detalhe">
         <Avatar cor={cor}>
           <Icon name="drop" size={19} />
@@ -368,88 +184,17 @@ function DetalheEssencia({ essencia: e, cor, onClose, onMudou, onEditar }) {
           <small>{data(e.criado_em)}</small>
         </span>
       </div>
-
-      {semClassificacao(e) ? (
-        <div className="aviso">
-          Esta essência ainda não tem características. Sem elas, o motor não consegue usá-la em acordes,
-          compatibilidade nem recomendações.{' '}
-          <button className="link" onClick={onEditar}>Classificar agora</button>
-        </div>
-      ) : (
-        <button className="btn btn-pequeno btn-contorno alinhar-esquerda" onClick={onEditar}>
-          <Icon name="edit" size={16} /> Editar classificação
-        </button>
-      )}
-
-      <div className="grade-dados">
-        <div>
-          <span>Família</span>
-          <strong>{e.familia || '—'}</strong>
-          {e.subfamilia && <small>{e.subfamilia}</small>}
-        </div>
-        <div>
-          <span>Tipo</span>
-          <strong>{rotulo(e.tipo)}</strong>
-        </div>
-        <div>
-          <span>Confiança</span>
-          <strong>{rotulo(e.confianca)}</strong>
-        </div>
-        <div>
-          <span>Origem</span>
-          <strong>{rotulo(e.origem)}</strong>
-        </div>
-        <div>
-          <span>Sensação</span>
-          <strong>{sensacao(e.v1) || '—'}</strong>
-        </div>
-        {e.editado_da_referencia && (
-          <div>
-            <span>Referência</span>
-            <strong>Ajustada por você</strong>
-          </div>
-        )}
+      <div className="chips">
+        {e.familia && <Pill>{e.familia}</Pill>}
+        {e.percepcao && <Pill tom="branco">{NOME_PERCEPCAO[e.percepcao]}</Pill>}
       </div>
-
-      <h3 className="secao-titulo">Características</h3>
-      <Eixos vetor={e} />
-
-      <h3 className="secao-titulo">Papel na pirâmide</h3>
-      {e.papel ? (
-        <Linhas itens={CAMADAS.map((c) => [c.nome, pct(e.papel[c.chave])])} />
-      ) : (
-        <p className="texto-suave">Ainda não informado.</p>
-      )}
-
-      {e.tags?.length > 0 && (
-        <div className="chips">
-          {e.tags.map((t) => (
-            <Pill key={t} tom="branco">#{t}</Pill>
-          ))}
-        </div>
-      )}
-
-      {e.descritores?.length > 0 && (
-        <>
-          <h3 className="secao-titulo">Descritores</h3>
-          <div className="chips">
-            {e.descritores.map((d) => (
-              <Pill key={d}>{d}</Pill>
-            ))}
-          </div>
-        </>
-      )}
-
-      <h3 className="secao-titulo">Observações</h3>
-      <p className="texto-suave">{e.observacoes || e.fornecedor ? [e.fornecedor, e.observacoes].filter(Boolean).join(' — ') : 'Nenhuma observação.'}</p>
-
       <Erro erro={erro} />
       <div className="botoes-duplos">
         <button className="btn btn-contorno" onClick={apagar} disabled={ocupado}>
           <Icon name="trash" size={18} /> Excluir
         </button>
-        <button className="btn btn-primario" onClick={favoritar} disabled={ocupado}>
-          <Icon name="heart" size={18} filled={e.favorito} /> {e.favorito ? 'Favorita' : 'Favoritar'}
+        <button className="btn btn-primario" onClick={onEditar} disabled={ocupado}>
+          <Icon name="edit" size={18} /> Editar
         </button>
       </div>
     </Sheet>
@@ -582,92 +327,11 @@ function Referencias() {
 }
 
 
-/**
- * Edição completa da classificação (funcionalidade "Classificação olfativa").
- * A aluna pode corrigir qualquer valor que veio da referência: a API marca a
- * essência como "ajustada" e nunca sobrescreve a correção dela.
- */
-function EditarEssencia({ essencia, familias, descritores, onClose, onSalva }) {
-  const [nome, setNome] = useState(essencia.nome);
-  const [valor, setValor] = useState(() => classificacaoDe(essencia));
-  const [sugestoes, setSugestoes] = useState(null);
-  const [erro, setErro] = useState(null);
-  const [enviando, setEnviando] = useState(false);
-
-  async function salvar(ev) {
-    ev.preventDefault();
-    setErro(null);
-    setEnviando(true);
-    try {
-      onSalva(await essencias.atualizar(essencia.id, { nome: nome.trim(), ...classificacaoParaApi(valor) }));
-    } catch (err) {
-      setErro(err);
-      setEnviando(false);
-    }
-  }
-
-  async function buscarReferencias() {
-    setErro(null);
-    try {
-      setSugestoes(await essencias.sugestoes(nome.trim()));
-    } catch (err) {
-      setErro(err);
-    }
-  }
-
-  // Aplicar preenche só o que está VAZIO; o que a aluna já informou continua.
-  async function aplicar(s) {
-    setEnviando(true);
-    try {
-      const nova = await essencias.atualizar(essencia.id, { knowledge_note_id: s.nota_id, aplicar_referencia: true });
-      setValor(classificacaoDe(nova));
-      setSugestoes(null);
-    } catch (err) {
-      setErro(err);
-    } finally {
-      setEnviando(false);
-    }
-  }
-
+/** Edição: os mesmos 3 campos, pré-preenchidos. */
+function EditarEssencia({ essencia, onClose, onSalva }) {
   return (
-    <Sheet titulo="Classificar essência" onClose={onClose}>
-      <form className="form" onSubmit={salvar}>
-        <Campo rotulo="Nome">
-          <input value={nome} onChange={(e) => setNome(e.target.value)} required maxLength={160} />
-        </Campo>
-        <div className="cartao cartao-suave">
-          <span className="rotulo">Usar a base de conhecimento</span>
-          <small className="texto-suave">
-            Busca uma nota de referência com este nome. Aplicar preenche só os campos que você ainda não informou.
-          </small>
-          {sugestoes === null ? (
-            <button type="button" className="btn btn-pequeno btn-contorno alinhar-esquerda" onClick={buscarReferencias}>
-              Buscar referência
-            </button>
-          ) : sugestoes.length ? (
-            sugestoes.map((s) => (
-              <div key={s.nota_id} className="linha-sugestao">
-                <CartaoSugestao sugestao={s} />
-                <button type="button" className="btn btn-pequeno btn-primario" onClick={() => aplicar(s)} disabled={enviando}>
-                  Aplicar
-                </button>
-              </div>
-            ))
-          ) : (
-            <small className="texto-suave">Nenhuma nota da base corresponde a “{nome}”. Classifique você mesma abaixo.</small>
-          )}
-        </div>
-        <ClassificacaoEssencia valor={valor} onChange={setValor} familias={familias} descritoresBase={descritores} />
-        <Erro erro={erro} />
-        <div className="botoes-duplos">
-          <button type="button" className="btn btn-contorno" onClick={onClose}>
-            Cancelar
-          </button>
-          <button type="submit" className="btn btn-primario" disabled={enviando}>
-            {enviando ? 'Salvando…' : 'Salvar'}
-          </button>
-        </div>
-      </form>
+    <Sheet titulo="Editar essência" onClose={onClose}>
+      <FormEssencia essencia={essencia} onClose={onClose} onSalva={onSalva} />
     </Sheet>
   );
 }
@@ -788,20 +452,8 @@ function EditarReferencia({ referencia: r, onClose, onSalva }) {
 
 /** O que a referência ensina: direção estimada, famílias e as essências DELA nessa direção. */
 function CaminhosReferencia({ referencia: r, onClose }) {
-  const navigate = useNavigate();
   const analise = useApi(() => referencias.caminhos(r.id), [r.id]);
-  const [erro, setErro] = useState(null);
   const a = analise.data;
-
-  async function criarInspirada() {
-    setErro(null);
-    try {
-      const c = await criacoes.criar({ nome: `Inspirada em ${r.nome}`.slice(0, 160), referencia_id: r.id });
-      navigate(`/criacoes/${c.id}`);
-    } catch (err) {
-      setErro(err);
-    }
-  }
 
   return (
     <Sheet titulo={`Caminhos de “${r.nome}”`} onClose={onClose}>
@@ -855,10 +507,6 @@ function CaminhosReferencia({ referencia: r, onClose }) {
             <p className="texto-suave">{a.recomendacoes.avisos[0] || 'Nenhuma essência comparável.'}</p>
           )}
 
-          <Erro erro={erro} />
-          <button className="btn btn-primario" onClick={criarInspirada}>
-            Criar uma criação inspirada nesta referência
-          </button>
         </>
       )}
     </Sheet>

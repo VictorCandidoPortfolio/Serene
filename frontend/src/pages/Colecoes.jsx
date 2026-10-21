@@ -208,7 +208,7 @@ function IdentidadeColecao({ identidade: id }) {
             <Pill key={f}>{f}</Pill>
           ))}
           {id.territorios.map((t) => (
-            <Pill key={t.chave} tom="amarelo">{t.nome} {t.proximidade}%</Pill>
+            <Pill key={t.chave} tom="amarelo">{t.nome}</Pill>
           ))}
         </div>
       )}

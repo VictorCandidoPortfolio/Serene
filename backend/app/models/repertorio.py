@@ -39,6 +39,7 @@ from app.db.base import Base
 from app.models.knowledge import NIVEIS_CONFIANCA, TIPOS_REFERENCIA, in_check
 
 ORIGENS_VALOR = ("informado", "tecnico", "inferido", "estimado")
+PERCEPCOES = ("fria", "neutra", "quente")
 STATUS_CRIACAO = ("rascunho", "em_ajuste", "aprovada", "arquivada")
 NIVEIS_PERCEPCAO = ("baixa", "media", "alta")
 
@@ -95,6 +96,7 @@ class Essencia(Base):
         CheckConstraint(in_check("tipo", TIPOS_REFERENCIA), name="tipo"),
         CheckConstraint(in_check("confianca", NIVEIS_CONFIANCA), name="confianca"),
         CheckConstraint(in_check("origem", ORIGENS_VALOR), name="origem"),
+        CheckConstraint("percepcao IS NULL OR " + in_check("percepcao", PERCEPCOES), name="percepcao"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -118,6 +120,9 @@ class Essencia(Base):
     tipo: Mapped[str] = mapped_column(
         String(20), default="desconhecida", server_default="desconhecida"
     )
+    # Sensação que a aluna informa (fria | neutra | quente). Os valores técnicos
+    # (v1..v5, papel...) são DEDUZIDOS pelo servidor a partir dela e da família.
+    percepcao: Mapped[str | None] = mapped_column(String(10))
     papel: Mapped[dict[str, float] | None] = mapped_column(JSON)
     v1: Mapped[float | None] = mapped_column(Float)
     v2: Mapped[float | None] = mapped_column(Float)
@@ -132,6 +137,11 @@ class Essencia(Base):
     fornecedor: Mapped[str | None] = mapped_column(String(160))
     descritores: Mapped[list[str]] = mapped_column(JSON, default=list)
     observacoes: Mapped[str | None] = mapped_column(Text)
+    # Ficha técnica: {identificacao, notas{saida,coracao,fundo}, documentacao{tipo,referencia},
+    # limites_uso{categoria:{max_pct_produto,fonte}}, restricoes{categorias_nao_indicadas,observacoes}}.
+    # Nulo = nada informado. Só o que está aqui conta como "documentado"; eixos v1–v6
+    # e descritores são avaliação sensorial; o que falta é DESCONHECIDO (nunca preenchido).
+    ficha: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     favorito: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     tags: Mapped[list[str]] = mapped_column(JSON, default=list)
     criado_em: Mapped[datetime] = _criado_em()
@@ -199,6 +209,9 @@ class Acorde(Base):
     # O que mudou nesta versão e por quê (ex.: "Ajuste mais fresco: adicionar
     # Bergamota"). Sem isso, o histórico mostrava O QUE mudou, mas não o motivo.
     motivo: Mapped[str | None] = mapped_column(String(300))
+    # Fórmula calculada para esta versão (produto, concentração, volume, quantidades,
+    # base). Nulo = a versão não tem formulação. Nunca é "validada" pelo sistema.
+    formulacao: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     criado_em: Mapped[datetime] = _criado_em()
 
     criacao: Mapped[Criacao] = relationship(back_populates="acordes")

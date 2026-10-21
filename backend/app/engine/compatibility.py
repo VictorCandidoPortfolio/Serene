@@ -8,12 +8,20 @@ Nenhum peso está no código: se a regra não existir, o motor recusa calcular.
 Formato esperado da regra `peso_score/compatibilidade`:
     {
       "base": 0.5,            # ponto de partida de qualquer par avaliado
-      "mesma_familia": 0.3,   # bônus quando as duas são da mesma família
-      "sem_relacao": 0.0,     # ajuste quando não há relação cadastrada
       "classico": 0.5, "complementar": 0.3, "contraste": 0.1, "atencao": -0.3,
       "limiar_alerta": 0.4    # pares abaixo disso geram alerta
     }
 O ajuste de um tipo é multiplicado por `relacao.peso` (0..1).
+
+Metodologia (a única): a nota de um par é `base + ajuste do tipo da relação ×
+peso da relação`, onde a relação entre as famílias (ou a família-mãe) está
+cadastrada em `knowledge_family_relations`. Um par é AVALIÁVEL só quando as duas
+essências têm família reconhecida E existe relação cadastrada entre as famílias.
+Não são avaliados (e ficam fora da média do grupo, sem nota "neutra"):
+- par sem família reconhecida;
+- par sem relação cadastrada;
+- par da MESMA família: pertencer à mesma família não torna duas essências
+  compatíveis. Sem avaliável nenhum, o grupo não tem porcentagem (`score=None`).
 """
 
 from collections.abc import Sequence
@@ -25,8 +33,6 @@ from app.engine.axes import EssenciaMotor, exigir_chaves
 
 CHAVES_PESOS = (
     "base",
-    "mesma_familia",
-    "sem_relacao",
     "classico",
     "complementar",
     "contraste",
@@ -44,6 +50,8 @@ class RelacaoFamilias:
     tipo: str
     peso: float
     descricao: str | None = None
+    # True quando a relação é conteúdo de exemplo (ainda não validado).
+    ilustrativo: bool = False
 
 
 @dataclass(frozen=True)
@@ -55,6 +63,9 @@ class ResultadoPar:
     score: float | None
     tipo_relacao: str | None
     explicacao: str
+    # Por que não foi avaliado: "sem_familia" | "sem_relacao" | "mesma_familia" (None se avaliado).
+    motivo_nao_avaliado: str | None = None
+    base_exemplo: bool = False
 
 
 @dataclass(frozen=True)
@@ -64,13 +75,27 @@ class ResultadoCompatibilidade:
     score: int | None
     pares: list[ResultadoPar]
     alertas: list[str] = field(default_factory=list)
+    pares_total: int = 0
+    # Alguma regra/relação usada para o cálculo é conteúdo de exemplo.
+    base_exemplo: bool = False
 
     def como_dict(self) -> dict[str, Any]:
-        """Formato persistido em `acordes.compatibilidade` e devolvido na API."""
+        """Formato persistido em `acordes.compatibilidade` e devolvido na API.
+
+        `pares` traz só os pares AVALIADOS (cada um com sua explicação); o que
+        não pôde ser avaliado vira, no máximo, uma linha consolidada em `alertas`.
+        """
+        avaliados = [p for p in self.pares if p.score is not None]
         return {
             "score": self.score,
             "alertas": self.alertas,
-            "pares": [p.__dict__ for p in self.pares],
+            "pares": [
+                {k: v for k, v in p.__dict__.items() if k not in ("motivo_nao_avaliado", "base_exemplo")}
+                for p in avaliados
+            ],
+            "pares_avaliados": len(avaliados),
+            "pares_total": self.pares_total,
+            "base_exemplo": self.base_exemplo,
         }
 
 
@@ -149,29 +174,32 @@ def _par(
         return ResultadoPar(
             a.id, b.id, None, None,
             f"'{sem}' não tem família reconhecida na base; compatibilidade não avaliada.",
+            motivo_nao_avaliado="sem_familia",
         )
 
     base = float(pesos["base"])
     if a.familia_chave == b.familia_chave:
-        score = base + float(pesos["mesma_familia"])
+        # Pertencer à mesma família NÃO torna duas essências compatíveis: sem
+        # relação cadastrada entre matérias-primas, não há critério para avaliar.
         return ResultadoPar(
-            a.id, b.id, round(max(0.0, min(1.0, score)), 3), "mesma_familia",
-            f"'{a.nome}' e '{b.nome}' são da mesma família ({a.familia}).",
+            a.id, b.id, None, None,
+            f"'{a.nome}' e '{b.nome}' são da mesma família ({a.familia}); isso, por si só, não mede compatibilidade.",
+            motivo_nao_avaliado="mesma_familia",
         )
 
     rel = _buscar_relacao(a.familia_chave, b.familia_chave, indice, hierarquia)
     if rel is None:
-        score = base + float(pesos["sem_relacao"])
+        # Sem relação cadastrada não há critério: nada de nota "neutra".
         return ResultadoPar(
-            a.id, b.id, round(max(0.0, min(1.0, score)), 3), None,
-            f"Não há relação cadastrada entre {a.familia} e {b.familia}; "
-            "score neutro, sem afirmação de que combinam ou não.",
+            a.id, b.id, None, None,
+            f"Não há relação cadastrada entre {a.familia} e {b.familia}.",
+            motivo_nao_avaliado="sem_relacao",
         )
 
     ajuste = float(pesos.get(rel.tipo, 0.0)) * float(rel.peso)
     score = max(0.0, min(1.0, base + ajuste))
     texto = rel.descricao or f"Relação '{rel.tipo}' entre {a.familia} e {b.familia}."
-    return ResultadoPar(a.id, b.id, round(score, 3), rel.tipo, texto)
+    return ResultadoPar(a.id, b.id, round(score, 3), rel.tipo, texto, base_exemplo=rel.ilustrativo)
 
 
 def compatibilidade_grupo(
@@ -198,14 +226,31 @@ def compatibilidade_grupo(
     limiar = float(pesos["limiar_alerta"])
 
     pares = [_par(a, b, indice, pesos, hier) for a, b in combinations(essencias, 2)]
+    nome = {e.id: e.nome for e in essencias}
     alertas: list[str] = []
     for par in pares:
-        if par.score is None:
-            alertas.append(par.explicacao)
-        elif par.tipo_relacao == "atencao" or par.score < limiar:
+        if par.score is not None and (par.tipo_relacao == "atencao" or par.score < limiar):
             alertas.append(f"Atenção: {par.explicacao}")
 
-    avaliados = [p.score for p in pares if p.score is not None]
-    score = round(100 * sum(avaliados) / len(avaliados)) if avaliados else None
-    # dict.fromkeys remove alertas duplicados preservando a ordem.
-    return ResultadoCompatibilidade(score=score, pares=pares, alertas=list(dict.fromkeys(alertas)))
+    # O que não pôde ser avaliado vira UMA linha por causa (não uma por par).
+    sem_familia = sorted({
+        e.nome for e in essencias if not e.familia_chave
+    } if any(p.motivo_nao_avaliado == "sem_familia" for p in pares) else set())
+    if sem_familia:
+        alertas.append(
+            f"Sem família reconhecida: {', '.join(sem_familia)}. "
+            "Classifique-as para avaliar a compatibilidade."
+        )
+    sem_relacao = [f"{nome[p.essencia_a]} + {nome[p.essencia_b]}"
+                   for p in pares if p.motivo_nao_avaliado == "sem_relacao"]
+    if sem_relacao:
+        alertas.append("Sem relação cadastrada entre as famílias de: " + "; ".join(sem_relacao) + ".")
+
+    avaliados = [p for p in pares if p.score is not None]
+    if not avaliados and not alertas and any(p.motivo_nao_avaliado == "mesma_familia" for p in pares):
+        alertas.append("Essências da mesma família não têm compatibilidade calculada só por isso.")
+    score = round(100 * sum(p.score for p in avaliados) / len(avaliados)) if avaliados else None
+    return ResultadoCompatibilidade(
+        score=score, pares=pares, alertas=list(dict.fromkeys(alertas)),
+        pares_total=len(pares), base_exemplo=any(p.base_exemplo for p in avaliados),
+    )

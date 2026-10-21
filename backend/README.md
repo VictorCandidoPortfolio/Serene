@@ -199,6 +199,7 @@ Tudo exige o token; a lógica fica em [app/services/conta_service.py](app/servic
 | Identidade de um acorde (territórios que transmite) | `GET /criacoes/{id}/acordes/{aid}/identidade` | `engine/recommendation.py::identificar_territorios` |
 | Criador de fragrâncias (direção por perfil, território ou referência + sugestões) | `POST /criacoes` (`perfil_id` \| `intencao` \| `referencia_id`), `GET /criacoes/{id}/recomendacoes` | `services/criacoes_service.py` |
 | **Motor de criação** ("O que você quer criar?": pedido → identidade + acorde sugerido) | `POST /criacoes/sugerir` (prévia, não grava), `GET /criacoes/sugerir/opcoes`, `POST /criacoes` com `sugestao` | `engine/criacao.py`, `services/sugestao_service.py` |
+| **Formulação** (body splash 7/10/15 %, perfume 20/25/30 %; descrição em linguagem natural → acorde → fórmula quantitativa) | `GET /formulacoes/produtos`, `POST /formulacoes/propor`, `POST /formulacoes/calcular`; `POST /criacoes` e `POST /criacoes/{id}/acordes` aceitam `formulacao` | `engine/formulacao.py`, `engine/linguagem.py`, `services/formulacao_service.py` |
 | Compatibilidade sem gravar acorde | `POST /essencias/compatibilidade` | `engine/compatibility.py` |
 | Caminhos de uma referência | `GET /referencias/{id}/caminhos` | `engine/referencias.py` |
 | Evolução (motivo de cada versão) | `POST /criacoes/{id}/acordes` (`motivo`) | `models/repertorio.py::Acorde.motivo` |
@@ -239,6 +240,36 @@ perfil (`perfis_olfativos.respostas`), a criação (`direcao`) e a versão 1 do 
 - Pesos fixos por posição (`[3,2,1]`) são simplificação pedagógica; a proporção real depende da
   intensidade e da persistência de cada essência e deve ser validada em bancada.
 - O motor orienta a criação; **não prevê** como a mistura vai cheirar na pele.
+
+### Cadastro simples de essência (3 campos)
+
+A aluna informa **Nome, Família e Percepção** (Fria / Neutra / Quente). O servidor deduz o resto; o cliente
+**nunca** define v1–v5, papel, tipo, confiança ou origem (se enviar, é ignorado, sem erro).
+
+| Rota | O que faz |
+|---|---|
+| `POST /essencias` `{nome, familia, percepcao, aceitou_nota_id?}` | cadastra e devolve a essência completa |
+| `PUT /essencias/{id}` (mesmos campos, todos opcionais) | edita; **recalcula** os derivados se família/percepção mudarem |
+| `GET /essencias/opcoes` | os 8 grupos de cheiro (do banco, em ordem) e as 3 percepções |
+| `GET /essencias/sugestao?nome=` | reconhece o nome na base (`exata`/`parecida`) e **sugere** família e percepção; não grava |
+| `PUT /essencias/{id}/ficha` | ficha técnica documentada (limites de uso, restrições); fora do formulário simples |
+
+Derivação (dados em `knowledge_engine_rules`, seed em `app/seed/data_criacao.py`; **valores iniciais a calibrar**):
+v1 pela percepção (3 / 5 / 8); v2, v3, v4 e papel pelo perfil típico do grupo (`criacao_territorio.perfil`); v5 neutro (4);
+confiança baixa e origem `estimado`. Nota reconhecida, mantida pela aluna e **não de exemplo**: usa os valores e a confiança da
+nota (origem `inferido`). Se ela muda a sugestão, vale a escolha dela, o vínculo fica e `editado_da_referencia` vira verdadeiro.
+O motor de criação não avisa por essência de confiança baixa; mostra no máximo uma frase suave quando **todas** as do acorde são assim.
+
+**Divergências em relação ao pedido original:** (a) os 8 grupos são os territórios olfativos (`criacao_territorio`), não as 14
+famílias de `knowledge_families` (os nomes não coincidem); o motor trata cada grupo como a sua primeira família da base.
+(b) as regras de derivação ficam em `criacao_territorio.perfil` e `peso_score/percepcao`, sem tipo novo de regra.
+(c) `nome_canonico` continua sendo o nome normalizado (busca/duplicidade), não o nome da nota. (d) Nota de exemplo nunca tem os
+números copiados (regra do projeto desde a Fase 1).
+
+**Limitações conhecidas:** deduzir o perfil só por grupo + percepção é uma estimativa grosseira: duas essências do mesmo grupo e da
+mesma percepção ficam com perfis idênticos, e a persistência e o papel reais podem divergir bastante. Por isso o motor de criação
+fica menos preciso com essências não reconhecidas pela base; a solução natural é crescer `knowledge_notes`. Os valores de partida vêm
+de poucas notas por grupo e precisam de calibração com a professora e testes reais.
 
 Testes: [tests/test_funcionalidades.py](tests/test_funcionalidades.py), que também varre o OpenAPI e
 falha se alguma rota nova ficar sem exigir login.

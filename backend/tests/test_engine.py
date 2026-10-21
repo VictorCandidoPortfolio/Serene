@@ -98,7 +98,37 @@ def test_compatibilidade_atencao_gera_alerta_e_herda_da_familia_mae():
 def test_compatibilidade_sem_familia_nao_e_chutada():
     r = compatibilidade_grupo([BERGAMOTA, SEM_DADOS], RELACOES, PARAMS["compatibilidade"])
     assert r.score is None
-    assert "não avaliada" in r.alertas[0]
+    assert r.alertas == ["Sem família reconhecida: Mistério. Classifique-as para avaliar a compatibilidade."]
+    assert r.como_dict()["pares"] == []  # par não avaliado não vira linha na lista
+
+
+def test_par_sem_relacao_cadastrada_nao_recebe_nota_neutra():
+    """Antes: score 0,5 ("50 %") inventado e incluído na média. Agora: não avaliado."""
+    r = compatibilidade_grupo([BERGAMOTA, CEDRO], RELACOES, PARAMS["compatibilidade"])
+    assert r.score is None and r.como_dict()["pares_avaliados"] == 0
+    assert r.alertas == ["Sem relação cadastrada entre as famílias de: Bergamota + Cedro."]
+
+
+def test_par_nao_avaliado_nao_entra_na_media_do_grupo():
+    # Bergamota+Jasmim: clássico (100). Jasmim+Cedro: clássico peso .8 (90). Bergamota+Cedro: sem relação.
+    r = compatibilidade_grupo([BERGAMOTA, JASMIM, CEDRO], RELACOES, PARAMS["compatibilidade"])
+    assert r.score == 95 and r.como_dict()["pares_avaliados"] == 2 and r.como_dict()["pares_total"] == 3
+    assert len(r.alertas) == 1  # uma linha para o par sem relação, nada repetido
+
+
+def test_eixos_sem_cobertura_minima_ficam_sem_valor_e_um_aviso_so():
+    r = calcular_acorde([(BERGAMOTA, 1), (SEM_DADOS, 3)], cobertura_minima=0.5)
+    assert r.vetor["v1"] is None and r.papel is None  # só 25 % do peso tinha dado
+    assert len(r.avisos) == 1 and "Sem dados suficientes" in r.avisos[0]
+    ok = calcular_acorde([(BERGAMOTA, 3), (SEM_DADOS, 1)], cobertura_minima=0.5)
+    assert ok.vetor["v1"] == 2 and ok.papel is not None
+
+
+def test_aviso_lista_so_o_que_falta():
+    completo = ess(7, "Completa", "floral", (5, 5, 5, 5, 5), {"saida": 0.3, "coracao": 0.4, "fundo": 0.3})
+    r = calcular_acorde([(completo, 1), (completo, 2)], cobertura_minima=0.5)
+    # só v6 (floralidade) não foi informado: é a única coisa citada, uma vez.
+    assert len(r.avisos) == 1 and "floralidade" in r.avisos[0] and "temperatura" not in r.avisos[0]
 
 
 def test_compatibilidade_sem_regra_falha_alto():

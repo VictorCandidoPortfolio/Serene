@@ -8,6 +8,10 @@ Isolamento: as candidatas vêm de `EssenciaRepository(db, user_id)`. A base
 `knowledge_*` entra apenas como REGRAS e como referência para NOMEAR lacunas
 — nunca como candidata. Por isso uma nota de conhecimento não pode aparecer no
 acorde, mesmo que a usuária não tenha cadastrado nada.
+
+Regra de confiabilidade: nada é afirmado sem dado. Pedido sem direção,
+repertório sem características e essência sem características NÃO geram
+identidade, acorde ou justificativa inventados; cada limitação aparece uma vez.
 """
 
 from typing import Any
@@ -17,12 +21,14 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import BusinessRuleError, KnowledgeUnavailableError, NotFoundError
 from app.core.text import chave
 from app.engine import criacao as motor
+from app.engine import linguagem
 from app.engine.axes import ROTULOS_PESO, EssenciaMotor
 from app.engine.gaps import lacuna_para_movimento, lacunas_repertorio
 from app.models.repertorio import Essencia
 from app.repositories.repertorio import EssenciaRepository
 from app.schemas.sugestao import (
     AcordeSugeridoOut,
+    EntendimentoOut,
     IdentidadeOut,
     ItemSugeridoOut,
     LacunaSugestaoOut,
@@ -40,7 +46,13 @@ TIPOS_REGRAS = (
 GENEROS = [("feminino", "Feminino"), ("masculino", "Masculino"), ("unissex", "Unissex"),
            ("nao_definir", "Prefiro não definir")]
 MSG_INSUFICIENTE = "Cadastre pelo menos 2 essências para o laboratório criar com você."
-MSG_FRACO = ("Com as essências que você tem hoje, a proposta chega só parcialmente nessa direção.")
+MSG_SEM_DIRECAO = "Escolha ao menos uma emoção ou preferência para o laboratório criar com você."
+MSG_SEM_ENTENDER = ("Não identifiquei emoções ou preferências na sua descrição. Use palavras como amor, "
+                    "calma, doce, floral, fresco, amadeirado… ou escolha as opções.")
+MSG_SEM_DADOS = ("Nenhuma das suas essências tem características suficientes para comparar com o pedido. "
+                 "Classifique ao menos duas na tela de Essências.")
+MSG_BASE = "As sugestões ficam mais precisas quando suas essências são reconhecidas pela nossa base."
+MSG_FRACO = "Com as essências que você tem hoje, a proposta chega só parcialmente nessa direção."
 
 
 class SugestaoService:
@@ -127,12 +139,26 @@ class SugestaoService:
             padrao_pesos = self.ctx.parametros("criacao_padrao_pesos")
         territorios = motor.carregar_territorios(regras["criacao_territorio"])
         vocab = regras["criacao_vocabulario"]["identidade"]
+        # Descrição em linguagem natural: só palavras cadastradas; soma-se ao que veio nos chips.
+        interp = linguagem.interpretar(
+            entrada.descricao, regras["criacao_emocao"], regras["criacao_preferencia"],
+            regras["criacao_vocabulario"].get("linguagem", {}))
+        intensidade = (entrada.intensidade if entrada.intensidade is not None
+                       else interp.intensidade if interp.intensidade is not None
+                       else float(params["intensidade_padrao"]))
         pedido = motor.Pedido(
             genero=entrada.genero,
             faixa_idade=self._faixa(entrada.idade, regras["criacao_idade"]),
-            emocoes=tuple(entrada.emocoes), preferencias=tuple(entrada.preferencias),
-            intensidade=entrada.intensidade,
+            emocoes=tuple(dict.fromkeys([*entrada.emocoes, *interp.emocoes])),
+            preferencias=tuple(dict.fromkeys([*entrada.preferencias, *interp.preferencias])),
+            intensidade=intensidade,
         )
+        entendimento = None
+        if entrada.descricao and entrada.descricao.strip():
+            entendimento = EntendimentoOut(
+                emocoes=linguagem.rotulos(interp.emocoes, regras["criacao_emocao"]),
+                preferencias=linguagem.rotulos(interp.preferencias, regras["criacao_preferencia"]),
+                intensidade=interp.intensidade, negados=interp.negados)
         repertorio_db = self._repertorio(entrada)
 
         with regras_obrigatorias():
@@ -147,11 +173,8 @@ class SugestaoService:
         repertorio: list[EssenciaMotor] = [self.ctx.essencia_motor(e) for e in repertorio_db]
         territorio_de = {e.id: motor.territorio_da_familia(e.familia_chave, territorios, self.ctx.hierarquia)
                          for e in repertorio}
-        confianca_de = {e.id: e.confianca for e in repertorio_db}
         papel_de = {e.id: e.papel for e in repertorio}
 
-        ident = motor.identidade(pedido, alvo, top, territorios, regras["criacao_emocao"],
-                                 regras["criacao_preferencia"], vocab)
         avisos: list[str] = []
         if alvo.nao_reconhecidos:
             avisos.append("Não reconheci estes itens e não os usei: "
@@ -160,16 +183,38 @@ class SugestaoService:
             "vetor_alvo": alvo.vetor, "territorios": alvo.territorios, "dominantes": list(top),
             "faixa_idade": pedido.faixa_idade, "max_itens": alvo.max_itens,
         }
+        if not alvo.tem_direcao:
+            # Só o ponto neutro de partida: descrevê-lo como "direção" seria inventar.
+            return SugestaoOut(
+                status="pedido_incompleto",
+                mensagem=MSG_SEM_ENTENDER if entendimento else MSG_SEM_DIRECAO, identidade=None, acorde=None,
+                avisos=avisos, lacunas=[], dados_suficientes=False, tecnico=tecnico, entendimento=entendimento,
+            )
 
+        ident = motor.identidade(pedido, alvo, top, territorios, regras["criacao_emocao"],
+                                 regras["criacao_preferencia"], vocab)
         if not repertorio:
             return SugestaoOut(
                 status="insuficiente", mensagem=MSG_INSUFICIENTE,
                 identidade=IdentidadeOut(**ident), acorde=None, avisos=avisos, lacunas=[],
-                confianca="baixa", tecnico=tecnico,
+                dados_suficientes=False, tecnico=tecnico, entendimento=entendimento,
             )
 
-        ranking = motor.pontuar_essencias(
-            repertorio, territorio_de, confianca_de, alvo.vetor, alvo.territorios, top, params)
+        ranking_completo = motor.pontuar_essencias(
+            repertorio, territorio_de, alvo.vetor, alvo.territorios, top, params)
+        # Essência sem características suficientes não pode ser comparada com o
+        # pedido: fica de fora (e é citada UMA vez), em vez de entrar com nota inventada.
+        ranking = [p for p in ranking_completo if p.nivel_proximidade != "sem_dado"]
+        sem_dado = sorted(p.essencia.nome for p in ranking_completo if p.nivel_proximidade == "sem_dado")
+        if not ranking:
+            return SugestaoOut(
+                status="dados_insuficientes", mensagem=MSG_SEM_DADOS, identidade=IdentidadeOut(**ident),
+                acorde=None, avisos=avisos, lacunas=[], dados_suficientes=False, tecnico=tecnico, entendimento=entendimento,
+            )
+        if sem_dado:
+            avisos.append("Ficaram de fora por falta de características: " + ", ".join(sem_dado)
+                          + ". Classifique-as na tela de Essências.")
+
         relacoes, hierarquia = self.ctx.relacoes, self.ctx.hierarquia
         montagem = motor.montar_acorde(
             ranking, alvo.vetor, alvo.max_itens, territorios, relacoes, hierarquia, params)
@@ -178,17 +223,14 @@ class SugestaoService:
         tecnico["vetor_acorde"] = calculo.vetor
         tecnico["scores"] = {p.essencia.id: round(p.score, 4) for p in ranking}
 
-        # ---- avisos e lacunas (sempre categorias, nunca essências) ----------
-        if len(repertorio) == 1:
+        # ---- avisos e lacunas: cada causa uma vez; sempre categorias, nunca essências ----
+        if len(ranking) == 1 and not sem_dado:
             avisos.append("Seu repertório tem só uma essência: o acorde fica com pouca variedade.")
-        elif len(montagem.escolhidas) >= 3:
-            grupo = motor.compatibilidade_de_grupo(
-                [p.essencia for p in montagem.escolhidas], relacoes, hierarquia, params)
-            for nome in grupo.isoladas:
-                avisos.append(f"{nome} tende a ficar isolada neste acorde; vale testar com atenção.")
-        if any(p.nivel_proximidade == "sem_dado" for p in montagem.escolhidas):
-            avisos.append("Algumas essências do acorde ainda não têm informação suficiente para eu "
-                          "afirmar o papel delas com segurança. Classifique-as na tela de Essências.")
+        # Cadastro simples: os valores são estimados (confiança baixa) e válidos. Não há aviso
+        # por essência; só UMA frase suave quando TODAS as do acorde são assim.
+        baixa = {e.id for e in repertorio_db if e.confianca == "baixa"}
+        if montagem.escolhidas and all(p.essencia.id in baixa for p in montagem.escolhidas):
+            avisos.append(MSG_BASE)
 
         nomes_familias = {f.chave: f.nome for f in self.ctx.familias_ref}
         presentes_t = {t for t in territorio_de.values() if t}
@@ -204,33 +246,46 @@ class SugestaoService:
                 with regras_obrigatorias():
                     g = lacuna_para_movimento(delta, calculo.vetor, self.ctx.familias_ref,
                                               presentes_f, motor.descrever_delta(delta))
-                lacunas.append(LacunaSugestaoOut(tipo="eixo", categoria=", ".join(g.detalhe.get("familias", [])) or None,
-                                                 mensagem=g.mensagem))
+                lacunas.append(LacunaSugestaoOut(
+                    tipo="eixo", categoria=", ".join(g.detalhe.get("familias", [])) or None,
+                    mensagem=g.mensagem))
         if entrada.modo == "mostrar_lacunas":
             # Visão geral do repertório: só CATEGORIAS que faltam (famílias, camadas).
             with regras_obrigatorias():
                 geral = lacunas_repertorio(repertorio, self.ctx.familias_ref,
                                            self.ctx.parametros("lacunas"))
+            ja = {lac.mensagem for lac in lacunas}
             lacunas += [LacunaSugestaoOut(tipo=g.tipo, mensagem=g.mensagem)
-                        for g in geral if g.tipo not in ("repertorio_vazio", "dados_incompletos")][:3]
+                        for g in geral if g.tipo not in ("repertorio_vazio", "dados_incompletos")
+                        and g.mensagem not in ja][:3]
 
-        genero = entrada.genero
         out_itens = [
             ItemSugeridoOut(
                 essencia_id=i.pontuada.essencia.id, nome=i.pontuada.essencia.nome, peso=i.peso,
                 rotulo_peso=ROTULOS_PESO[i.peso],
                 papel_na_criacao=motor.explicar_essencia(
-                    i.pontuada, papel_de[i.pontuada.essencia.id], territorios, genero, vocab),
+                    i.pontuada, papel_de[i.pontuada.essencia.id], territorios, top, alvo.vetor,
+                    params, vocab),
             ) for i in itens
         ]
+        funcoes: dict[str, list[str]] = {"saida": [], "coracao": [], "fundo": []}
+        for i in itens:
+            papel = papel_de[i.pontuada.essencia.id]
+            if papel:
+                dominante = max(motor.CAMADAS, key=lambda c: (float(papel.get(c) or 0), -motor.CAMADAS.index(c)))
+                if float(papel.get(dominante) or 0) > float(vocab.get("papel_dominante_acima_de", 0.5)):
+                    funcoes[dominante].append(i.pontuada.essencia.nome)
         acorde = AcordeSugeridoOut(
             itens=out_itens, familia_resultante=calculo.familia_resultante, piramide=calculo.papel,
-            explicacao=motor.explicacao_do_acorde([i.nome for i in out_itens], alvo, regras["criacao_emocao"]),
+            funcoes={k: v for k, v in funcoes.items() if v},
+            explicacao=motor.explicacao_do_acorde(
+                [i.nome for i in out_itens], alvo, regras["criacao_emocao"], calculo.vetor, params),
         )
-        confianca = motor.nivel_de_confianca(len(repertorio), montagem.fraco, montagem.escolhidas, params)
         return SugestaoOut(
             status="ok", mensagem=None, identidade=IdentidadeOut(**ident), acorde=acorde,
-            avisos=avisos, lacunas=lacunas, confianca=confianca, tecnico=tecnico,
+            avisos=avisos, lacunas=lacunas,
+            dados_suficientes=motor.dados_suficientes(montagem.fraco, montagem.escolhidas),
+            tecnico=tecnico, entendimento=entendimento,
         )
 
     def _perfis_de_territorio(self, territorios: dict[str, motor.Territorio]) -> dict[str, dict[str, float]]:

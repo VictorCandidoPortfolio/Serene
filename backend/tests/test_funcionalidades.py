@@ -11,7 +11,7 @@ import re
 import pytest
 
 from app.main import app
-from tests.util import VALORES_DA_ALUNA
+from tests.util import VALORES_DA_ALUNA, essencia_antiga
 
 TERRITORIOS = {"acolhimento", "delicadeza", "alegria", "amor", "encanto", "renovacao",
                "frescor", "elegancia", "magnetismo", "sensualidade"}
@@ -28,27 +28,10 @@ def repertorio(client, nova_usuaria):
     """Usuária com 3 essências (Jasmim, Cedro, Bergamota): família pela nota de exemplo, números dela."""
     h = nova_usuaria("ana@exemplo.com")
     ids = {
-        nome: _post(client, "/essencias", {"nome": nome, "knowledge_note_id": nota,
-                                          "aplicar_referencia": True, **VALORES_DA_ALUNA[nome]}, h)["id"]
-        for nome, nota in (("Bergamota", 1), ("Jasmim", 3), ("Cedro", 4))
+        nome: essencia_antiga(client, h, {"nome": nome, **VALORES_DA_ALUNA[nome]}, grupo).json()["id"]
+        for nome, grupo in (("Bergamota", "Cítrico"), ("Jasmim", "Floral"), ("Cedro", "Amadeirado"))
     }
     return h, ids
-
-
-# ------------------------------------------------- classificação / floralidade
-def test_classificacao_manual_completa_inclui_floralidade(client, nova_usuaria):
-    h = nova_usuaria("c@exemplo.com")
-    e = _post(client, "/essencias", {"nome": "Flor de laranjeira do fornecedor X"}, h)
-    assert e["v1"] is None and e["confianca"] == "baixa"
-    r = client.put(f"/essencias/{e['id']}", headers=h, json={
-        "familia": "Floral", "subfamilia": "Floral Branco", "tipo": "simples",
-        "papel": {"saida": 0.2, "coracao": 0.7, "fundo": 0.1},
-        "v1": 4, "v2": 5, "v3": 6, "v4": 6, "v5": 5, "v6": 9,
-        "confianca": "media", "origem": "informado", "descritores": ["cremoso"],
-        "observacoes": "diluída a 10%", "tags": ["verão"],
-    })
-    assert r.status_code == 200, r.text
-    assert r.json()["v6"] == 9 and r.json()["subfamilia"] == "Floral Branco"
 
 
 def test_floralidade_entra_no_acorde_e_no_movimento(client, repertorio):
@@ -100,7 +83,7 @@ def test_compatibilidade_avulsa_nao_grava_nada(client, repertorio, nova_usuaria)
     assert client.get("/criacoes", headers=h).json() == []  # nada criado
 
     b = nova_usuaria("b@exemplo.com")
-    eb = _post(client, "/essencias", {"nome": "Minha"}, b)
+    eb = essencia_antiga(client, b, {"nome": "Minha"}).json()
     r = client.post("/essencias/compatibilidade", headers=b,
                     json={"essencia_ids": [eb["id"], ids["Jasmim"]]})
     assert r.status_code == 404  # essência de outra usuária

@@ -73,8 +73,8 @@ function Painel({ ess, cri, fam, navigate }) {
           <button className="btn btn-primario" onClick={() => navigate('/essencias?nova=1')}>
             Nova essência
           </button>
-          <button className="btn btn-primario" onClick={() => navigate('/criacoes/laboratorio')}>
-            ✨ Criar com o laboratório
+          <button className="btn btn-primario" onClick={() => navigate('/formulacao')}>
+            ✨ Criar formulação
           </button>
         </div>
       </section>

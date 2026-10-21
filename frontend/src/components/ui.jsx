@@ -70,9 +70,12 @@ export function Linhas({ itens }) {
 
 /** Barras 0–10 dos cinco eixos. `alvo` (opcional) desenha a marca do perfil. */
 export function Eixos({ vetor, alvo }) {
+  // Só eixos COM valor: linha "sem dado" e barra vazia seriam indicador sem base.
+  const comValor = EIXOS.filter((e) => vetor?.[e.chave] !== null && vetor?.[e.chave] !== undefined);
+  if (!comValor.length) return null;
   return (
     <ul className="eixos">
-      {EIXOS.map((e) => {
+      {comValor.map((e) => {
         const v = vetor?.[e.chave];
         const a = alvo?.[e.chave];
         return (

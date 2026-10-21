@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import BusinessRuleError, ConflictError, NotFoundError
 from app.core.text import chave
 from app.engine.axes import PESOS_RELATIVOS, EssenciaMotor
-from app.engine.compatibility import compatibilidade_grupo
 from app.engine.movement import sugerir_ajuste
 from app.engine.recommendation import identificar_territorios
 from app.engine.vectors import calcular_acorde
@@ -34,6 +33,8 @@ from app.schemas.criacoes import (
 from app.services.motor import ContextoMotor, regras_obrigatorias
 from app.services.outros_service import ReferenciasService
 from app.services.perfis_service import calcular_alvo, direcao_de, direcao_do_perfil, recomendar
+from app.schemas.formulacao_pedido import FormulacaoPedidoIn
+from app.services.formulacao_service import FormulacaoService
 from app.services.sugestao_service import SugestaoService
 
 
@@ -104,6 +105,12 @@ class CriacoesService:
         user_id = self.repo.user_id
         sugestao = SugestaoService(self.db, user_id).sugerir(payload.sugestao)
         tecnico = sugestao.tecnico
+        if payload.formulacao is not None and sugestao.acorde is not None:
+            # Fórmula inválida ou essência alheia: recusa ANTES de gravar criação ou perfil.
+            r = FormulacaoService(self.db, user_id).calcular_itens(
+                payload.formulacao, [(i.essencia_id, i.peso) for i in sugestao.acorde.itens])
+            if not r.valido:
+                raise BusinessRuleError("Fórmula inválida: " + " ".join(r.erros))
         perfil = self.perfis.add(PerfilOlfativo(
             respostas=payload.sugestao.model_dump(exclude_none=True),
             vetor_alvo={"origem": "criacao", "vetor": tecnico["vetor_alvo"],
@@ -127,6 +134,7 @@ class CriacoesService:
             AcordesService(self.db, user_id).criar(criacao.id, AcordeCreate(
                 itens=[AcordeItemIn(essencia_id=i.essencia_id, peso=i.peso) for i in itens],
                 motivo="Sugestão inicial do laboratório",
+                formulacao=payload.formulacao,
             ))
             self.db.refresh(criacao)
         return criacao
@@ -177,9 +185,45 @@ class AcordesService:
 
     def __init__(self, db: Session, user_id: int):
         self.db = db
+        self.user_id = user_id
         self.criacoes = CriacaoRepository(db, user_id)
         self.repo = AcordeRepository(db, user_id)
         self.essencias = EssenciaRepository(db, user_id)
+
+    def _formulacao(self, criacao: Criacao, payload: AcordeCreate) -> dict | None:
+        """Fórmula da nova versão: a pedida, ou a da versão anterior reaplicada.
+
+        - Pedida (`payload.formulacao`): precisa ser válida, senão a versão NÃO é criada.
+        - Herdada: recalculada com as essências/pesos novos. Se ficar inválida
+          (ex.: limite documentado), grava o resultado com `valido=false` e os
+          erros, para a aluna ver o motivo; nada é omitido em silêncio.
+        - Sem pedido e sem fórmula anterior: a versão não tem formulação.
+        """
+        svc = FormulacaoService(self.db, self.user_id)
+        pares = [(i.essencia_id, PESOS_RELATIVOS[i.peso]) for i in payload.itens]
+        if payload.formulacao is not None:
+            pedido = payload.formulacao
+            r = svc.calcular_itens(pedido, pares)
+            if not r.valido:
+                raise BusinessRuleError("Fórmula inválida: " + " ".join(r.erros))
+        else:
+            anteriores = [a for a in self.repo.list_by_criacao(criacao.id) if a.formulacao]
+            if not anteriores:
+                return None
+            p = anteriores[-1].formulacao["pedido"]
+            manual = p.get("proporcoes_pct")
+            if manual and {int(k) for k in manual} != {i for i, _ in pares}:
+                manual = None   # as essências mudaram: a divisão manual antiga não vale mais
+            pedido = FormulacaoPedidoIn(produto=p["produto"], volume_ml=p["volume_ml"],
+                                        concentracao_pct=p["concentracao_pct"], proporcoes_pct=manual)
+            r = svc.calcular_itens(pedido, pares)
+        return {
+            "pedido": {"produto": pedido.produto, "volume_ml": float(pedido.volume_ml),
+                       "concentracao_pct": float(pedido.concentracao_pct),
+                       "proporcoes_pct": ({str(k): float(v) for k, v in pedido.proporcoes_pct.items()}
+                                          if pedido.proporcoes_pct else None)},
+            "resultado": r.model_dump(),
+        }
 
     def listar(self, criacao_id: int) -> list[Acorde]:
         """Histórico completo de versões (v1, v2, ...)."""
@@ -221,14 +265,11 @@ class AcordesService:
         motor = self._essencias_do_repertorio(ctx, ids)
         itens_motor = [(motor[i.essencia_id], PESOS_RELATIVOS[i.peso]) for i in payload.itens]
 
-        resultado = calcular_acorde(itens_motor)
         with regras_obrigatorias():
-            compat = compatibilidade_grupo(
-                [e for e, _ in itens_motor],
-                ctx.relacoes,
-                ctx.parametros("compatibilidade"),
-                ctx.hierarquia,
-            )
+            minimo = float(ctx.parametros("validacao")["cobertura_minima_eixo"])
+        resultado = calcular_acorde(itens_motor, cobertura_minima=minimo)
+        with regras_obrigatorias():
+            compat = ctx.compatibilidade([e for e, _ in itens_motor])
 
         acorde = Acorde(
             versao=self.repo.proxima_versao(criacao),
@@ -248,6 +289,7 @@ class AcordesService:
             familia_resultante=resultado.familia_resultante,
             compatibilidade=compat.como_dict(),
             motivo=(payload.motivo or "").strip() or None,
+            formulacao=self._formulacao(criacao, payload),
         )
         try:
             self.repo.add(criacao, acorde)
@@ -276,13 +318,15 @@ class AcordesService:
             territorios = identificar_territorios(
                 vetor, regras["correlacao_territorio"], nomes, ctx.parametros("identidade")
             )
+        # Uma única orientação, e só quando ela ajuda a aluna a avançar: sem
+        # dado suficiente não há identidade a afirmar. Território "não próximo
+        # o bastante" não é erro nem pede ação: a lista fica simplesmente vazia.
         avisos = []
-        if not territorios:
+        if not territorios and (acorde.vetor or {}).get("eixos_sem_dado"):
             avisos.append(
-                "Nenhum território está próximo o bastante deste acorde para afirmar uma identidade."
+                "Faltam características nas essências deste acorde para identificar o que ele "
+                "transmite. Classifique-as na tela de Essências."
             )
-        if (acorde.vetor or {}).get("eixos_sem_dado"):
-            avisos.append("Alguns eixos do acorde estão sem dado; a identidade considera só os demais.")
         return {
             "acorde_id": acorde.id,
             "versao": acorde.versao,

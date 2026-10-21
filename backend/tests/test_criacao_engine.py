@@ -37,7 +37,7 @@ def ess(i, nome, fam=None, v=(5, 5, 5, 5), papel=None, chave_fam=None):
 
 def pont(e, terr=None, **kw):
     return c.EssenciaPontuada(e, terr, kw.get("score", 10.0), 5.0, kw.get("no_alvo", False),
-                              "razoavel", False)
+                              kw.get("nivel", "razoavel"))
 
 
 # ---------------------------------------------------------------- vetor-alvo
@@ -113,7 +113,7 @@ def test_pick_dois_territorios_quando_segundo_tem_pelo_menos_metade():
 
 def test_pick_empate_desempata_pela_ordem_e_nunca_passa_de_dois():
     top = c.pick_territorios({"aromatico": 4, "floral": 4, "fresco": 4}, ORDEM, PARAMS)
-    assert top == ["floral", "fresco"]
+    assert top == ["fresco", "floral"]
 
 
 def test_pick_fallback_pelo_perfil_de_referencia():
@@ -123,7 +123,7 @@ def test_pick_fallback_pelo_perfil_de_referencia():
 
 
 def test_pick_fallback_sem_perfil_usa_a_ordem_fixa():
-    assert c.pick_territorios({}, ORDEM, PARAMS, {}, {"v1": 5, "v2": 5, "v3": 5}) == ["floral"]
+    assert c.pick_territorios({}, ORDEM, PARAMS, {}, {"v1": 5, "v2": 5, "v3": 5}) == ["fresco"]
     assert c.pick_territorios({}, {}, PARAMS) == []
 
 
@@ -132,7 +132,7 @@ def test_essencia_no_territorio_dominante_pontua_mais_a_igual_proximidade():
     a = ess(1, "A", "Floral", (5, 5, 5, 5))
     b = ess(2, "B", "Amadeirado", (5, 5, 5, 5))
     alvo = {"v1": 5, "v2": 5, "v3": 5, "v4": 5, "v5": 4}
-    r = c.pontuar_essencias([b, a], {1: "floral", 2: "amadeirado"}, {}, alvo,
+    r = c.pontuar_essencias([b, a], {1: "floral", 2: "amadeirado"}, alvo,
                             {"floral": 4}, ["floral"], PARAMS)
     assert [p.essencia.id for p in r] == [1, 2]
     assert r[0].score == 3 * 2 + 10 and r[1].score == 10
@@ -141,22 +141,21 @@ def test_essencia_no_territorio_dominante_pontua_mais_a_igual_proximidade():
 def test_bonus_fora_do_alvo_usa_pontos_do_territorio():
     e = ess(1, "A", "Fresco", (5, 5, 5, 5))
     alvo = {"v1": 5, "v2": 5, "v3": 5, "v4": 5, "v5": 4}
-    [p] = c.pontuar_essencias([e], {1: "fresco"}, {}, alvo, {"fresco": 2, "floral": 6}, ["floral"], PARAMS)
+    [p] = c.pontuar_essencias([e], {1: "fresco"}, alvo, {"fresco": 2, "floral": 6}, ["floral"], PARAMS)
     assert p.score == pytest.approx(2 * 0.4 * 2 + 10)
 
 
 def test_essencia_sem_dado_recebe_proximidade_neutra_e_nao_inventa():
     e = EssenciaMotor(1, "X", None, None, {"v1": None, "v2": None, "v3": 5, "v4": None})
     alvo = {"v1": 0, "v2": 0, "v3": 0, "v4": 0, "v5": 0}
-    [p] = c.pontuar_essencias([e], {}, {}, alvo, {}, [], PARAMS)
+    [p] = c.pontuar_essencias([e], {}, alvo, {}, [], PARAMS)
     assert p.proximidade == PARAMS["proximidade_neutra"] and p.nivel_proximidade == "sem_dado"
-    assert p.baixa_confianca
 
 
 def test_desempate_do_ranking_e_pelo_id():
     iguais = [ess(i, f"E{i}", "Floral") for i in (7, 3, 5)]
     alvo = {"v1": 5, "v2": 5, "v3": 5, "v4": 5, "v5": 4}
-    r = c.pontuar_essencias(iguais, {}, {}, alvo, {}, [], PARAMS)
+    r = c.pontuar_essencias(iguais, {}, alvo, {}, [], PARAMS)
     assert [p.essencia.id for p in r] == [3, 5, 7]
 
 
@@ -198,7 +197,7 @@ def test_grupo_marca_essencia_isolada():
 
 # ----------------------------------------------------------------- montagem
 def ranking_de(essencias, alvo, top=("floral",)):
-    return c.pontuar_essencias(essencias, {e.id: "floral" for e in essencias}, {}, alvo,
+    return c.pontuar_essencias(essencias, {e.id: "floral" for e in essencias}, alvo,
                                {"floral": 4}, list(top), PARAMS)
 
 
@@ -235,7 +234,7 @@ def test_montagem_vazia_e_fraca():
 
 def test_fraco_quando_a_melhor_nao_chega_a_8():
     longe = [ess(1, "A", "Amadeirado", (10, 10, 0, 0))]
-    r = c.montar_acorde(c.pontuar_essencias(longe, {1: "amadeirado"}, {}, ALVO, {}, ["floral"], PARAMS),
+    r = c.montar_acorde(c.pontuar_essencias(longe, {1: "amadeirado"}, ALVO, {}, ["floral"], PARAMS),
                         ALVO, 4, TERRITORIOS, [], {}, PARAMS)
     assert r.fraco
 
@@ -296,21 +295,77 @@ def test_direcao_em_texto_segue_o_template():
         "Fresca, delicadamente doce e com presença suave."
 
 
-def test_genero_so_troca_a_frase_nunca_a_familia():
-    vocab = REGRAS["criacao_vocabulario"]["identidade"]
-    p = pont(ess(1, "Peônia", "Floral"), "floral")
-    fem = c.explicar_essencia(p, None, TERRITORIOS, "feminino", vocab)
-    masc = c.explicar_essencia(p, None, TERRITORIOS, "masculino", vocab)
-    assert fem == "Traz delicadeza e feminilidade." and masc == "Traz delicadeza floral."
+ALVO_TXT = {"v1": 3, "v2": 5, "v3": 7, "v4": 4, "v5": 4}
+VOCAB = REGRAS["criacao_vocabulario"]["identidade"]
+
+
+def explicar(p, papel=None, top=("floral",)):
+    return c.explicar_essencia(p, papel, TERRITORIOS, top, ALVO_TXT, PARAMS, VOCAB)
+
+
+def test_explicacao_cita_so_fatos_calculados():
+    perto = pont(ess(1, "Peonia", "Floral", (3.5, 9, 6.5, 9)), "floral")  # v1 e v3 perto; v2 e v4 longe
+    assert explicar(perto) == "É do território Floral (o que você pediu). Está próxima do que você pediu em temperatura e doçura."
+
+
+def test_explicacao_nao_inventa_quando_nao_ha_fato():
+    longe = pont(ess(1, "X", None, (9, 9, 0, 9)))  # sem território reconhecido, nada perto, sem papel
+    assert explicar(longe) is None
+
+
+def test_explicacao_nao_usa_frase_generica_por_familia_nem_genero():
+    p = pont(ess(1, "Rosa", "Floral", (9, 9, 0, 9)), "floral")
+    texto = explicar(p)
+    assert texto == "É do território Floral (o que você pediu)."
+    assert "delicadeza" not in texto and "feminilidade" not in texto
+
+
+def test_eixo_sem_valor_nao_conta_como_proximo():
+    p = pont(ess(1, "X", "Floral", (None, None, None, None)), "floral")
+    assert explicar(p) == "É do território Floral (o que você pediu)."
 
 
 def test_frase_do_papel_so_quando_passa_de_50_por_cento():
-    vocab = REGRAS["criacao_vocabulario"]["identidade"]
-    p = pont(ess(1, "X", "Floral"), "floral")
-    assert c.explicar_essencia(p, {"saida": .9, "coracao": .1, "fundo": 0}, TERRITORIOS, "unissex", vocab) \
-        .endswith("Abre a criação com leveza.")
-    assert c.explicar_essencia(p, {"saida": .4, "coracao": .4, "fundo": .2}, TERRITORIOS, "unissex", vocab) \
-        == "Traz delicadeza floral."
+    p = pont(ess(1, "X", None, (9, 9, 0, 9)))
+    assert explicar(p, {"saida": .9, "coracao": .1, "fundo": 0}) == "Abre a criação com leveza."
+    assert explicar(p, {"saida": .4, "coracao": .4, "fundo": .2}) is None
+
+
+def test_explicacao_do_acorde_so_cita_proximidade_que_existe():
+    a = alvo_de(emocoes=("amor", "paz"), intensidade=4)
+    regras = REGRAS["criacao_emocao"]
+    longe = {"v1": 9, "v2": 9, "v3": 0, "v4": 9}
+    assert c.explicacao_do_acorde(["A", "B"], a, regras, longe, PARAMS) == "Escolhi A e B porque você pediu amor e paz."
+    perto = {"v1": a.vetor["v1"], "v2": 9, "v3": a.vetor["v3"], "v4": 9}
+    assert "próximas do que você pediu em temperatura e doçura" in c.explicacao_do_acorde(["A"], a, regras, perto, PARAMS)
+
+
+def test_tem_direcao_exige_regra_com_efeito():
+    assert alvo_de(emocoes=("amor",)).tem_direcao
+    assert not alvo_de().tem_direcao
+    assert not alvo_de(preferencias=("suave",), intensidade=2).tem_direcao  # só mexe em v4
+    assert not alvo_de(emocoes=("inexistente",)).tem_direcao
+    assert not alvo_de(faixa_idade="bebe").tem_direcao  # idade sozinha não é direção
+
+
+def test_piramide_exige_cobertura_minima_de_papel():
+    com = pont(ess(1, "A", "Floral", (5, 5, 5, 5), {"saida": 1, "coracao": 0, "fundo": 0}), "floral")
+    sem = pont(ess(2, "B", "Floral", (5, 5, 5, 5)), "floral")
+    assert c.vetor_do_acorde([(com, 1), (sem, 3)], TERRITORIOS, PARAMS).papel is None  # só 25 % do peso
+    assert c.vetor_do_acorde([(com, 3), (sem, 1)], TERRITORIOS, PARAMS).papel is not None
+
+
+def test_eixo_do_acorde_sem_cobertura_fica_sem_valor():
+    com = pont(ess(1, "A", "Floral", (5, 5, 5, 5)), "floral")
+    sem = pont(ess(2, "B", "Floral", (None, None, None, None)), "floral")
+    v = c.vetor_do_acorde([(com, 1), (sem, 3)], TERRITORIOS, PARAMS).vetor
+    assert v["v1"] is None and v["v4"] is None
+
+
+def test_dados_suficientes_e_fato_nao_selo():
+    e = pont(ess(1, "A"))
+    assert c.dados_suficientes(False, [e]) is True
+    assert c.dados_suficientes(True, [e]) is False and c.dados_suficientes(False, []) is False
 
 
 def test_nada_de_random_no_motor():

@@ -12,6 +12,7 @@ assim nunca há como uma nota de conhecimento virar candidata de sugestão.
 from collections.abc import Iterator
 from contextlib import contextmanager
 from functools import cached_property
+from dataclasses import replace
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -19,7 +20,7 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import KnowledgeUnavailableError
 from app.core.text import chave
 from app.engine.axes import EIXOS, EssenciaMotor, RegraInvalidaError
-from app.engine.compatibility import RelacaoFamilias
+from app.engine.compatibility import RelacaoFamilias, ResultadoCompatibilidade, compatibilidade_grupo
 from app.engine.gaps import FamiliaRef
 from app.models.knowledge import KnowledgeFamily
 from app.models.repertorio import Essencia
@@ -66,6 +67,15 @@ class ContextoMotor:
             for parte in f.nome.split("/"):
                 idx.setdefault(chave(parte), f)
             idx[f.slug] = f  # slug tem prioridade sobre nome em caso de colisão
+        # O cadastro simples guarda o GRUPO de cheiro ("Fresco", "Âmbar/Envolvente"...)
+        # como família. Para o motor, cada grupo vale pela sua primeira família da base
+        # (regra `criacao_territorio.familias`); nomes que já são famílias não mudam.
+        por_slug = {f.slug: f for f in self._familias}
+        for chave_t, regra in self.repo.regras_por_tipo("criacao_territorio")["criacao_territorio"].items():
+            rep = next((por_slug[s] for s in regra.get("familias", []) if s in por_slug), None)
+            if rep is not None:
+                idx.setdefault(chave(regra.get("nome", chave_t)), rep)
+                idx.setdefault(chave_t, rep)
         return idx
 
     def familia_por_texto(self, texto: str | None) -> KnowledgeFamily | None:
@@ -84,7 +94,7 @@ class ContextoMotor:
         por_id = {f.id: f.slug for f in self._familias}
         return [
             RelacaoFamilias(
-                por_id[r.family_a_id], por_id[r.family_b_id], r.tipo_relacao, r.peso, r.descricao
+                por_id[r.family_a_id], por_id[r.family_b_id], r.tipo_relacao, r.peso, r.descricao, r.ilustrativo
             )
             for r in self.repo.relacoes()
             if r.family_a_id in por_id and r.family_b_id in por_id
@@ -126,6 +136,20 @@ class ContextoMotor:
                 "Execute o seed (python -m app.seed)."
             )
         return regra.valor
+
+    def compatibilidade(self, essencias: list[EssenciaMotor]) -> ResultadoCompatibilidade:
+        """Compatibilidade de um grupo com as relações e os pesos da base.
+
+        `base_exemplo` fica True se alguma relação usada OU a própria regra de
+        pesos for conteúdo de exemplo: a interface avisa que a nota ainda não
+        vem da base oficial.
+        """
+        resultado = compatibilidade_grupo(
+            essencias, self.relacoes, self.parametros("compatibilidade"), self.hierarquia
+        )
+        regra = self.repo.regra("peso_score", "compatibilidade")
+        exemplo = resultado.base_exemplo or bool(regra and regra.ilustrativo)
+        return replace(resultado, base_exemplo=exemplo and resultado.score is not None)
 
     def essencia_motor(self, e: Essencia) -> EssenciaMotor:
         """Converte uma essência DA USUÁRIA para o formato do motor.

@@ -112,6 +112,13 @@ def popular(db: Session) -> dict[str, int]:
                 {"valor": valor, "descricao": descricao, "ativo": True,
                  "ilustrativo": tipo not in data.TIPOS_REGRA_DA_CLIENTE})
 
+    # Regras de formulação que saíram do seed (ex.: produtos antigos) são
+    # desativadas, nunca apagadas: o histórico de calibração fica.
+    vigentes = {c for t, c, *_ in data.REGRAS if t == "peso_score"}
+    for r in db.scalars(select(KnowledgeEngineRule).filter_by(tipo="peso_score")):
+        if r.chave.startswith("formulacao_") and r.chave not in vigentes:
+            r.ativo = False
+
     db.commit()
     return {
         "knowledge_families": len(data.FAMILIAS),

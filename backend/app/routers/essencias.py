@@ -18,6 +18,9 @@ from app.schemas.essencias import (
     EssenciaCriadaOut,
     EssenciaOut,
     EssenciaUpdate,
+    FichaIn,
+    OpcoesCadastroOut,
+    SugestaoNomeOut,
     SugestaoReferencia,
 )
 from app.services.essencias_service import EssenciasService
@@ -52,6 +55,18 @@ def sugestao_classificacao(svc: Service, nome: Annotated[str, Query(min_length=1
     return svc.sugerir_classificacao(nome)
 
 
+@router.get("/opcoes", response_model=OpcoesCadastroOut)
+def opcoes(svc: Service):
+    """Chips do cadastro: os 8 grupos de cheiro (do banco) e as 3 percepções."""
+    return svc.opcoes_cadastro()
+
+
+@router.get("/sugestao", response_model=SugestaoNomeOut)
+def sugestao(svc: Service, nome: Annotated[str, Query(min_length=1, max_length=160)]):
+    """Reconhece o nome na base e SUGERE família e percepção (nada é gravado)."""
+    return svc.sugerir_por_nome(nome)
+
+
 @router.post("/compatibilidade", response_model=CompatibilidadeOut)
 def compatibilidade(payload: CompatibilidadeIn, svc: Service):
     """Analisa como 2 a 20 essências do repertório trabalham juntas (nada é gravado)."""
@@ -74,6 +89,12 @@ def obter(essencia_id: int, svc: Service):
 def atualizar(essencia_id: int, payload: EssenciaUpdate, svc: Service):
     """Atualiza os campos enviados (os omitidos ficam como estão)."""
     return svc.atualizar(essencia_id, payload)
+
+
+@router.put("/{essencia_id}/ficha", response_model=EssenciaOut)
+def definir_ficha(essencia_id: int, payload: FichaIn | None, svc: Service):
+    """Grava a ficha técnica documentada (limites de uso, restrições...). Corpo vazio/nulo limpa."""
+    return svc.definir_ficha(essencia_id, payload.model_dump(exclude_none=True) if payload else None)
 
 
 @router.delete("/{essencia_id}", status_code=status.HTTP_204_NO_CONTENT)

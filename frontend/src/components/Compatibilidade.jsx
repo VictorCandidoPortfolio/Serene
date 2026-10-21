@@ -16,13 +16,16 @@ const NOME_RELACAO = {
  */
 export default function ResultadoCompatibilidade({ resultado, nomes = {}, compacto = false }) {
   if (!resultado) return null;
-  const { score, pares = [], alertas = [] } = resultado;
+  const { score, alertas = [], base_exemplo: exemplo } = resultado;
+  // Só pares efetivamente avaliados (dados antigos podem trazer pares sem nota).
+  const pares = (resultado.pares || []).filter((p) => typeof p.score === 'number');
   return (
     <div className="compat">
-      {typeof score === 'number' ? (
-        <Gauge valor={score / 100} rotulo="Compatibilidade" detalhe={`${pares.length} par(es)`} />
-      ) : (
-        <p className="aviso">Sem famílias reconhecidas o bastante para avaliar a compatibilidade.</p>
+      {typeof score === 'number' && (
+        <>
+          <Gauge valor={score / 100} rotulo="Compatibilidade" detalhe={`${pares.length} par(es) avaliado(s)`} />
+          {exemplo && <small className="texto-suave">Calculada com relações de exemplo, ainda não validadas.</small>}
+        </>
       )}
       {!compacto &&
         pares.map((p, i) => (
@@ -36,7 +39,7 @@ export default function ResultadoCompatibilidade({ resultado, nomes = {}, compac
             {p.explicacao}
           </p>
         ))}
-      {alertas.map((a, i) => (
+      {[...new Set(alertas)].map((a, i) => (
         <p key={i} className="aviso">
           {a}
         </p>
