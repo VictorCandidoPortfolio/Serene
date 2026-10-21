@@ -1,17 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { criacoes, formulacoes } from '../api/serene';
+import { criacoes, essencias, formulacoes } from '../api/serene';
 import { useApi } from '../lib/useApi';
 import Icon from '../components/Icon';
 import { Cabecalho } from '../components/Layout';
+import FormEssencia from '../components/FormEssencia';
 import FormulaTabela from '../components/FormulaTabela';
+import Sheet from '../components/Sheet';
 import { Campo, Carregando, Chips, Erro, Grupo, Pill } from '../components/ui';
 
 /**
  * Fluxo de formulação: produto -> concentração -> volume -> descrição em
- * linguagem natural -> proposta (acorde só com as essências dela) -> fórmula.
- * Concentrações e base vêm da API. A fórmula só aparece quando há fundamento;
- * sem ele, a tela mostra apenas a orientação necessária.
+ * linguagem natural -> proposta. A proposta interpreta a descrição, consulta SÓ
+ * as essências da aluna, monta o acorde e calcula a "Fórmula proposta"
+ * (concentrado, essências, base, volume final). Concentrações e base vêm da API.
+ * A fórmula só aparece quando há fundamento; sem ele, a tela diz objetivamente o
+ * que falta e deixa a aluna completar as essências ali mesmo.
  */
 export default function Formulacao() {
   const navigate = useNavigate();
@@ -36,17 +40,11 @@ export default function Formulacao() {
     setProposta(null);
   }, [produto]);
 
-  async function propor(e) {
-    e.preventDefault();
+  /** Envia o pedido ao servidor, que faz toda a conta (nada é calculado no navegador). */
+  async function enviar(corpo) {
     setErro(null);
     setCalculando(true);
     try {
-      const corpo = {
-        produto,
-        concentracao_pct: conc,
-        volume_ml: Number(volume.replace(',', '.')),
-        descricao: descricao.trim(),
-      };
       setProposta(await formulacoes.propor(corpo));
       setPedidoEnviado(corpo);
       window.scrollTo({ top: 0 });
@@ -55,6 +53,16 @@ export default function Formulacao() {
     } finally {
       setCalculando(false);
     }
+  }
+
+  function propor(e) {
+    e.preventDefault();
+    enviar({
+      produto,
+      concentracao_pct: conc,
+      volume_ml: Number(volume.replace(',', '.')),
+      descricao: descricao.trim(),
+    });
   }
 
   const voltar = (
@@ -70,7 +78,13 @@ export default function Formulacao() {
       {produtos.loading && !produtos.data ? (
         <Carregando />
       ) : proposta ? (
-        <Proposta proposta={proposta} pedido={pedidoEnviado} atual={atual} onCriada={(id) => navigate(`/criacoes/${id}`)} />
+        <Proposta
+          proposta={proposta}
+          pedido={pedidoEnviado}
+          refazendo={calculando}
+          onRefazer={() => enviar(pedidoEnviado)}
+          onCriada={(id) => navigate(`/criacoes/${id}`)}
+        />
       ) : (
         <form className="form" onSubmit={propor}>
           <Grupo rotulo="Produto">
@@ -107,7 +121,7 @@ export default function Formulacao() {
           </Campo>
 
           <button className="btn btn-primario" disabled={calculando || !conc || !descricao.trim()}>
-            {calculando ? 'Criando…' : '✨ Criar proposta'}
+            {calculando ? 'Calculando…' : '✨ Criar proposta'}
           </button>
         </form>
       )}
@@ -115,18 +129,20 @@ export default function Formulacao() {
   );
 }
 
-function Proposta({ proposta, pedido, atual, onCriada }) {
-  const { sugestao, formulacao, sem_formulacao: semFormulacao } = proposta;
-  const { identidade, acorde, entendimento } = sugestao;
+function Proposta({ proposta, pedido, refazendo, onRefazer, onCriada }) {
+  const { sugestao, formulacao, sem_formulacao: semFormulacao, pode_salvar: podeSalvar, motivo_nao_salvar: motivo } = proposta;
+  const { identidade, acorde, entendimento, essencias_sem_dados: semDados = [] } = sugestao;
   const [nome, setNome] = useState(identidade?.nome_sugerido || '');
+  const [completando, setCompletando] = useState(null);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState(null);
-  const pode = formulacao?.valido;
+  const temFormula = formulacao?.valido;
 
   const entendi = entendimento
     ? [...entendimento.emocoes, ...entendimento.preferencias, ...(entendimento.intensidade != null ? [`intensidade ${entendimento.intensidade}`] : [])]
     : [];
-  const avisos = [...new Set([...(sugestao.avisos || []), ...(formulacao?.avisos || [])])];
+  // Os avisos da fórmula já aparecem em "Pendências técnicas": não se repetem aqui.
+  const avisos = sugestao.avisos || [];
 
   async function salvar() {
     setErro(null);
@@ -145,14 +161,21 @@ function Proposta({ proposta, pedido, atual, onCriada }) {
     }
   }
 
+  async function abrirCompletar(id) {
+    setErro(null);
+    try {
+      setCompletando(await essencias.obter(id));
+    } catch (err) {
+      setErro(err);
+    }
+  }
+
   return (
     <>
       {entendimento && (
         <section className="cartao">
           <h2 className="secao-titulo">O que entendi</h2>
-          {entendi.length ? (
-            <div className="chips">{entendi.map((t) => <Pill key={t}>{t}</Pill>)}</div>
-          ) : null}
+          {entendi.length ? <div className="chips">{entendi.map((t) => <Pill key={t}>{t}</Pill>)}</div> : null}
           {entendimento.negados.length > 0 && (
             <small className="texto-suave">Não usei (você disse que não quer): {entendimento.negados.join(', ')}.</small>
           )}
@@ -161,16 +184,39 @@ function Proposta({ proposta, pedido, atual, onCriada }) {
 
       {sugestao.status !== 'ok' && sugestao.mensagem && <p className="aviso">{sugestao.mensagem}</p>}
 
-      {identidade && (
-        <section className="cartao-amarelo">
-          <h2>{identidade.nome_sugerido || 'Sua fragrância'}</h2>
-          <p><strong>Direção:</strong> {identidade.direcao}</p>
+      {semDados.length > 0 && (
+        <section className="cartao">
+          <h2 className="secao-titulo">Essências para completar</h2>
+          <small className="texto-suave">
+            Estas essências ainda não têm Família e Percepção, então não entram na fórmula. Complete e refaça a proposta.
+          </small>
+          <ul className="lista">
+            {semDados.map((e) => (
+              <li key={e.id} className="item">
+                <span className="item-texto"><strong>{e.nome}</strong></span>
+                <button type="button" className="btn btn-pequeno btn-contorno" onClick={() => abrirCompletar(e.id)}>
+                  Completar
+                </button>
+              </li>
+            ))}
+          </ul>
         </section>
       )}
 
+      {temFormula && <FormulaTabela formulacao={formulacao} nome={identidade?.nome_sugerido} />}
+      {formulacao && !formulacao.valido && (
+        <section className="cartao">
+          <h2 className="secao-titulo">Não foi possível calcular</h2>
+          {formulacao.erros.map((m) => <p key={m} className="aviso">{m}</p>)}
+        </section>
+      )}
+      {semFormulacao && <p className="aviso">{semFormulacao}</p>}
+
       {acorde && (
         <section>
-          <h2 className="secao-titulo">Acorde proposto{acorde.familia_resultante ? ` · ${acorde.familia_resultante}` : ''}</h2>
+          <h2 className="secao-titulo">
+            Por que estas essências{acorde.familia_resultante ? ` · ${acorde.familia_resultante}` : ''}
+          </h2>
           <ul className="cartoes">
             {acorde.itens.map((i) => (
               <li key={i.essencia_id} className="cartao">
@@ -186,29 +232,35 @@ function Proposta({ proposta, pedido, atual, onCriada }) {
         </section>
       )}
 
-      {semFormulacao && <p className="aviso">{semFormulacao}</p>}
-      {formulacao && !formulacao.valido && (
-        <section className="cartao">
-          <h2 className="secao-titulo">Não foi possível calcular</h2>
-          {formulacao.erros.map((m) => <p key={m} className="aviso">{m}</p>)}
-        </section>
-      )}
-      {pode && <FormulaTabela formulacao={formulacao} base={atual?.exemplo} />}
-
       {avisos.map((a) => <p key={a} className="aviso">{a}</p>)}
       {sugestao.lacunas.map((l) => <p key={l.mensagem} className="aviso">{l.mensagem}</p>)}
 
       <Erro erro={erro} />
-      {acorde && (
-        <Campo rotulo="Nome da criação">
-          <input value={nome} onChange={(e) => setNome(e.target.value)} maxLength={160} />
-        </Campo>
+      {acorde && podeSalvar && (
+        <>
+          <Campo rotulo="Nome da criação">
+            <input value={nome} onChange={(e) => setNome(e.target.value)} maxLength={160} />
+          </Campo>
+          <button className="btn btn-primario" onClick={salvar} disabled={salvando}>
+            {salvando ? 'Salvando…' : 'Salvar como criação'}
+          </button>
+        </>
       )}
-      {acorde && (
-        <button className="btn btn-primario" onClick={salvar} disabled={salvando || !pode}>
-          {salvando ? 'Salvando…' : 'Salvar como criação'}
-        </button>
+      {acorde && !podeSalvar && motivo && <p className="aviso">{motivo}</p>}
+
+      {completando && (
+        <Sheet titulo="Completar essência" onClose={() => setCompletando(null)}>
+          <FormEssencia
+            essencia={completando}
+            onClose={() => setCompletando(null)}
+            onSalva={() => {
+              setCompletando(null);
+              onRefazer();           // refaz a proposta já com os dados novos
+            }}
+          />
+        </Sheet>
       )}
+      {refazendo && <Carregando texto="Refazendo a proposta…" />}
     </>
   );
 }

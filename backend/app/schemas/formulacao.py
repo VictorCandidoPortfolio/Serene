@@ -88,6 +88,8 @@ class FormulacaoOut(BaseModel):
     criterio: str | None = None
     ingredientes: list[IngredienteOut] = []
     massa_total_g: float | None = None
+    # O que ainda precisa de confirmação técnica antes de produzir (base de exemplo, estimativas...).
+    pendencias: list[str] = []
     validacao: str
 
 
@@ -98,6 +100,9 @@ class PropostaOut(BaseModel):
     formulacao: FormulacaoOut | None = None
     # Por que não há fórmula (só aparece quando falta fundamento).
     sem_formulacao: str | None = None
+    # Salvar como criação exige fórmula válida e pelo menos 2 essências (um acorde tem 2 ou mais).
+    pode_salvar: bool = False
+    motivo_nao_salvar: str | None = None
 
 
 class FaixaOut(BaseModel):

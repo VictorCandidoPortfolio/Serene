@@ -467,3 +467,123 @@ def test_exige_login(client):
     assert client.post("/formulacoes/calcular", json={}).status_code in (401, 403)
     assert client.post("/formulacoes/propor", json={}).status_code in (401, 403)
     assert client.get("/formulacoes/produtos").status_code in (401, 403)
+
+
+# ---------------------------------------------------------------------------
+# Fluxo completo SÓ com o cadastro simples (nada gravado direto no banco)
+# ---------------------------------------------------------------------------
+ESSENCIAS_SIMPLES = [
+    ("Melancia", "Frutado", "fria"), ("Pera", "Frutado", "neutra"), ("Bergamota", "Cítrico", "fria"),
+    ("Peônia", "Floral", "neutra"), ("Rosa", "Floral", "neutra"), ("Lavanda", "Aromático", "fria"),
+    ("Musk Branco", "Almiscarado", "neutra"), ("Baunilha", "Gourmand", "quente"), ("Sândalo", "Amadeirado", "neutra"),
+]
+
+
+def cadastrar_simples(client, h, lista=ESSENCIAS_SIMPLES):
+    ids = {}
+    for nome, familia, percepcao in lista:
+        r = client.post("/essencias", headers=h, json={"nome": nome, "familia": familia, "percepcao": percepcao})
+        assert r.status_code == 201, r.text
+        ids[nome] = r.json()["id"]
+    return ids
+
+
+@pytest.fixture()
+def aluna(client, nova_usuaria):
+    h = nova_usuaria("simples-fluxo@exemplo.com")
+    return h, cadastrar_simples(client, h)
+
+
+@pytest.mark.parametrize("produto,conc,esperado", [
+    ("body_splash", 7, "7.00"), ("body_splash", 10, "10.00"), ("body_splash", 15, "15.00"),
+    ("perfume", 20, "20.00"), ("perfume", 25, "25.00"), ("perfume", 30, "30.00"),
+])
+def test_100ml_dao_o_concentrado_certo_e_a_formula_completa(client, aluna, produto, conc, esperado):
+    h, ids = aluna
+    r = post(client, h, "/formulacoes/propor", produto=produto, concentracao_pct=conc, volume_ml=100,
+             descricao="Paz delicada: algo calmo, delicado e floral").json()
+    f = r["formulacao"]
+    assert r["sugestao"]["status"] == "ok" and f["valido"]
+    assert f["concentrado_ml"] == float(esperado) and f["volume_ml"] == 100.0
+    essencias = [i for i in f["ingredientes"] if i["tipo"] == "essencia"]
+    base_ = [i for i in f["ingredientes"] if i["tipo"] == "base"]
+    assert len(essencias) >= 2 and {i["essencia_id"] for i in essencias} <= set(ids.values())
+    # soma das proporções = 100 % do concentrado; cada ml é % do concentrado × concentrado
+    assert round(sum(i["percentual_concentrado"] for i in essencias), 2) == 100.0
+    assert round(sum(i["volume_ml"] for i in essencias), 2) == float(esperado)
+    for i in essencias:
+        assert i["volume_ml"] == pytest.approx(float(esperado) * i["percentual_concentrado"] / 100, abs=0.011)
+    # base definida por componentes; volume final fecha em 100 ml
+    assert len(base_) >= 2 and round(sum(i["volume_ml"] for i in base_), 2) == 100.0 - float(esperado)
+    assert round(sum(i["volume_ml"] for i in f["ingredientes"]), 2) == 100.0
+    assert r["pode_salvar"] is True and r["motivo_nao_salvar"] is None
+    assert f["pendencias"] and any("exemplo" in p for p in f["pendencias"])        # pendências técnicas visíveis
+
+
+def test_pendencias_tecnicas_sao_honestas_e_sem_repeticao(client, aluna):
+    h, _ = aluna
+    f = post(client, h, "/formulacoes/propor", produto="perfume", concentracao_pct=20, volume_ml=100,
+             descricao="floral e calmo").json()["formulacao"]
+    todas = f["pendencias"] + f["avisos"]
+    assert len(todas) == len(set(todas))
+    assert any("estimados por família e percepção" in p for p in f["pendencias"])
+    assert any("gramas" in p for p in f["pendencias"])
+    assert "NÃO validada" in f["validacao"]
+
+
+def test_salvar_a_proposta_grava_criacao_acorde_e_formula_iguais_a_proposta(client, aluna):
+    h, _ = aluna
+    pedido = dict(produto="body_splash", concentracao_pct=15, volume_ml=100, descricao="Paz delicada, floral")
+    r = post(client, h, "/formulacoes/propor", **pedido).json()
+    c = client.post("/criacoes", headers=h, json={
+        "nome": r["sugestao"]["identidade"]["nome_sugerido"], "sugestao": {"descricao": pedido["descricao"]},
+        "formulacao": {"produto": "body_splash", "concentracao_pct": 15, "volume_ml": 100}})
+    assert c.status_code == 201, c.text
+    v1 = client.get(f"/criacoes/{c.json()['id']}/acordes", headers=h).json()[0]
+    salvo = v1["formulacao"]["resultado"]
+    assert salvo["concentrado_ml"] == 15.0
+    assert [(i["nome"], i["volume_ml"]) for i in salvo["ingredientes"]] == \
+           [(i["nome"], i["volume_ml"]) for i in r["formulacao"]["ingredientes"]]    # servidor recalcula igual
+
+
+def test_essencias_sem_dados_ficam_de_fora_e_podem_ser_completadas(client, nova_usuaria):
+    """Essência antiga, sem Família/Percepção: some da conta, é listada, e completar a libera."""
+    from tests.util import essencia_antiga
+    h = nova_usuaria("completar@exemplo.com")
+    vazio = {"familia": None, "percepcao": None, "v1": None, "v2": None, "v3": None, "v4": None, "v5": None, "papel": None}
+    antigas = [essencia_antiga(client, h, {"nome": n, **vazio}).json() for n in ("Antiga Um", "Antiga Dois")]
+    pedido = dict(produto="body_splash", concentracao_pct=10, volume_ml=100, descricao="algo floral e calmo")
+    r = post(client, h, "/formulacoes/propor", **pedido).json()
+    assert r["sugestao"]["status"] == "dados_insuficientes" and r["formulacao"] is None
+    assert sorted(e["nome"] for e in r["sugestao"]["essencias_sem_dados"]) == ["Antiga Dois", "Antiga Um"]
+    assert "Família e Percepção" in r["sugestao"]["mensagem"]
+    # completar UMA: já dá proposta e fórmula, mas não dá para salvar (um acorde tem 2 ou mais essências)
+    client.put(f"/essencias/{antigas[0]['id']}", headers=h, json={"familia": "Floral", "percepcao": "neutra"})
+    r = post(client, h, "/formulacoes/propor", **pedido).json()
+    assert r["formulacao"]["valido"] and len(r["sugestao"]["acorde"]["itens"]) == 1
+    assert r["formulacao"]["ingredientes"][0]["percentual_concentrado"] == 100.0
+    assert r["pode_salvar"] is False and "pelo menos 2 essências" in r["motivo_nao_salvar"]
+    assert [e["nome"] for e in r["sugestao"]["essencias_sem_dados"]] == ["Antiga Dois"]
+    # completar a segunda: pode salvar
+    client.put(f"/essencias/{antigas[1]['id']}", headers=h, json={"familia": "Frutado", "percepcao": "fria"})
+    r = post(client, h, "/formulacoes/propor", **pedido).json()
+    assert r["pode_salvar"] is True and r["sugestao"]["essencias_sem_dados"] == []
+    assert len(r["sugestao"]["acorde"]["itens"]) == 2
+
+
+def test_sem_nenhuma_essencia_a_mensagem_manda_cadastrar(client, nova_usuaria):
+    h = nova_usuaria("zero@exemplo.com")
+    r = post(client, h, "/formulacoes/propor", produto="perfume", concentracao_pct=20, volume_ml=100,
+             descricao="algo floral").json()
+    assert r["sugestao"]["status"] == "insuficiente" and r["formulacao"] is None and r["pode_salvar"] is False
+    assert "Cadastre" in r["sugestao"]["mensagem"]
+
+
+def test_essencias_de_outra_aluna_nunca_entram_na_formula(client, aluna, nova_usuaria):
+    h, ids = aluna
+    b = nova_usuaria("outra-fluxo@exemplo.com")
+    cadastrar_simples(client, b, [("Hortelã", "Aromático", "fria"), ("Limão", "Cítrico", "fria")])
+    r = post(client, h, "/formulacoes/propor", produto="body_splash", concentracao_pct=10, volume_ml=100,
+             descricao="fresco, calmo e floral").json()
+    nomes = {i["nome"] for i in r["formulacao"]["ingredientes"]}
+    assert not nomes & {"Hortelã", "Limão"}

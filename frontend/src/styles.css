@@ -687,3 +687,5 @@ input[type=range].inativo { opacity: 0.35; }
 /* ------------------------------------------- "O que você quer criar?" */
 .campo-check { display: flex; align-items: center; gap: 10px; font-size: 14px; min-height: 44px; cursor: pointer; }
 .campo-check input { width: 22px; height: 22px; accent-color: var(--lilac-forte); flex: none; }
+
+.lista-pendencias { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; line-height: 1.45; }

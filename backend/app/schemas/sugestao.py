@@ -69,6 +69,13 @@ class EntendimentoOut(BaseModel):
     negados: list[str]
 
 
+class EssenciaPendenteOut(BaseModel):
+    """Essência do repertório que ainda não pode entrar nos cálculos (falta Família e Percepção)."""
+
+    id: int
+    nome: str
+
+
 class AcordeSugeridoOut(BaseModel):
     """Acorde enxuto sugerido."""
 
@@ -99,6 +106,8 @@ class SugestaoOut(BaseModel):
     lacunas: list[LacunaSugestaoOut]
     dados_suficientes: bool
     entendimento: EntendimentoOut | None = None
+    # Essências da aluna que ficaram de fora por falta de dados (ela completa e refaz a proposta).
+    essencias_sem_dados: list[EssenciaPendenteOut] = []
     tecnico: dict[str, Any] = {}
 
 

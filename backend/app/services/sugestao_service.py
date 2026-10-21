@@ -29,6 +29,7 @@ from app.repositories.repertorio import EssenciaRepository
 from app.schemas.sugestao import (
     AcordeSugeridoOut,
     EntendimentoOut,
+    EssenciaPendenteOut,
     IdentidadeOut,
     ItemSugeridoOut,
     LacunaSugestaoOut,
@@ -49,8 +50,10 @@ MSG_INSUFICIENTE = "Cadastre pelo menos 2 essências para o laboratório criar c
 MSG_SEM_DIRECAO = "Escolha ao menos uma emoção ou preferência para o laboratório criar com você."
 MSG_SEM_ENTENDER = ("Não identifiquei emoções ou preferências na sua descrição. Use palavras como amor, "
                     "calma, doce, floral, fresco, amadeirado… ou escolha as opções.")
-MSG_SEM_DADOS = ("Nenhuma das suas essências tem características suficientes para comparar com o pedido. "
-                 "Classifique ao menos duas na tela de Essências.")
+# Uma essência só entra nos cálculos com Família e Percepção (é o que gera os valores internos).
+# Para a PROPOSTA basta uma; para SALVAR como criação são necessárias duas (um acorde tem 2 ou mais).
+MSG_SEM_DADOS = ("Para calcular a fórmula, ao menos uma essência precisa ter Família e Percepção. "
+                 "Complete as essências abaixo e refaça a proposta.")
 MSG_BASE = "As sugestões ficam mais precisas quando suas essências são reconhecidas pela nossa base."
 MSG_FRACO = "Com as essências que você tem hoje, a proposta chega só parcialmente nessa direção."
 
@@ -206,14 +209,17 @@ class SugestaoService:
         # pedido: fica de fora (e é citada UMA vez), em vez de entrar com nota inventada.
         ranking = [p for p in ranking_completo if p.nivel_proximidade != "sem_dado"]
         sem_dado = sorted(p.essencia.nome for p in ranking_completo if p.nivel_proximidade == "sem_dado")
+        pendentes = [EssenciaPendenteOut(id=p.essencia.id, nome=p.essencia.nome)
+                     for p in sorted(ranking_completo, key=lambda x: x.essencia.nome) if p.nivel_proximidade == "sem_dado"]
         if not ranking:
             return SugestaoOut(
                 status="dados_insuficientes", mensagem=MSG_SEM_DADOS, identidade=IdentidadeOut(**ident),
                 acorde=None, avisos=avisos, lacunas=[], dados_suficientes=False, tecnico=tecnico, entendimento=entendimento,
+                essencias_sem_dados=pendentes,
             )
         if sem_dado:
             avisos.append("Ficaram de fora por falta de características: " + ", ".join(sem_dado)
-                          + ". Classifique-as na tela de Essências.")
+                          + ". Abra cada uma em Essências e escolha Família e Percepção.")
 
         relacoes, hierarquia = self.ctx.relacoes, self.ctx.hierarquia
         montagem = motor.montar_acorde(
@@ -285,7 +291,7 @@ class SugestaoService:
             status="ok", mensagem=None, identidade=IdentidadeOut(**ident), acorde=acorde,
             avisos=avisos, lacunas=lacunas,
             dados_suficientes=motor.dados_suficientes(montagem.fraco, montagem.escolhidas),
-            tecnico=tecnico, entendimento=entendimento,
+            tecnico=tecnico, entendimento=entendimento, essencias_sem_dados=pendentes,
         )
 
     def _perfis_de_territorio(self, territorios: dict[str, motor.Territorio]) -> dict[str, dict[str, float]]:

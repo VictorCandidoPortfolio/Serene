@@ -32,7 +32,7 @@ export default function FormulaDaVersao({ acorde, criacaoId, onNovaVersao }) {
       )}
       {resultado?.valido && (
         <>
-          <FormulaTabela formulacao={resultado} base />
+          <FormulaTabela formulacao={resultado} titulo="Fórmula desta versão" />
           {[...new Set(resultado.avisos)].map((a) => <p key={a} className="aviso">{a}</p>)}
         </>
       )}

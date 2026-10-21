@@ -244,7 +244,8 @@ def test_repertorio_todo_sem_caracteristicas_nao_gera_acorde(client, nova_usuari
                                     "v4": None, "v5": None, "papel": None})
     r = sugerir(client, h, **PEDIDO_LUNA)
     assert r["status"] == "dados_insuficientes" and r["acorde"] is None
-    assert r["dados_suficientes"] is False and "Classifique" in r["mensagem"]
+    assert r["dados_suficientes"] is False and "Família e Percepção" in r["mensagem"]
+    assert sorted(e["nome"] for e in r["essencias_sem_dados"]) == ["Dois", "Um"]   # a aluna vê o que completar
     assert r["avisos"] == []  # a orientação está na mensagem; não se repete
 
 

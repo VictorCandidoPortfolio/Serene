@@ -128,13 +128,14 @@ class FormulacaoService:
         return out
 
     # ------------------------------------------------------------- cálculo
-    def _regra_do_produto(self, produto: str) -> dict:
+    def _regra_do_produto(self, produto: str) -> tuple[dict, bool]:
+        """(regra validada, é de exemplo?) do produto."""
         regras = self._regras()
         if produto not in regras:
             raise BusinessRuleError(
                 f"Produto '{produto}' desconhecido. Disponíveis: {', '.join(sorted(regras))}."
             )
-        return self._valida(regras[produto])
+        return self._valida(regras[produto]), regras[produto].ilustrativo
 
     def calcular_itens(
         self,
@@ -147,7 +148,7 @@ class FormulacaoService:
         Raises:
             NotFoundError: id fora do repertório dela (de outra usuária ou inexistente).
         """
-        regra = self._regra_do_produto(pedido.produto)
+        regra, base_de_exemplo = self._regra_do_produto(pedido.produto)
         achadas = self.essencias.get_many([i for i, _ in pares])
         faltando = [i for i, _ in pares if i not in achadas]
         if faltando:
@@ -157,7 +158,26 @@ class FormulacaoService:
         dens = densidades or {}
         itens = [_item(achadas[i], peso, pedido.produto, dens.get(i)) for i, peso in pares]
         r = calcular_formulacao(regra, itens, pedido.volume_ml, pedido.concentracao_pct, pedido.proporcoes_pct)
-        return saida_de(r)
+        saida = saida_de(r)
+        if saida.valido:
+            saida.pendencias = self._pendencias(
+                base_de_exemplo, [achadas[i] for i, _ in pares], saida.massa_total_g is None)
+        return saida
+
+    @staticmethod
+    def _pendencias(base_de_exemplo: bool, essencias: list[Essencia], sem_massa: bool) -> list[str]:
+        """O que ainda precisa de confirmação técnica antes de produzir (cada item só se for verdade)."""
+        out = []
+        if base_de_exemplo:
+            out.append("A composição da base e as concentrações do produto são valores de exemplo: "
+                       "confirme com a professora ou com o fornecedor da base.")
+        estimadas = sorted(e.nome for e in essencias if e.origem == "estimado")
+        if estimadas:
+            out.append("Valores olfativos estimados por família e percepção (sem ficha técnica) em: "
+                       + ", ".join(estimadas) + ". As proporções refletem essa estimativa.")
+        if sem_massa:
+            out.append("Quantidades em gramas não calculadas: faltam as densidades das essências e da base.")
+        return out
 
     def calcular(self, pedido: FormulacaoIn) -> FormulacaoOut:
         """Valida e calcula. Pedido tecnicamente inválido => 200 com `valido=false` e `erros`."""
@@ -202,12 +222,22 @@ class FormulacaoService:
             modo=pedido.modo,
         ))
         if sugestao.status != "ok" or sugestao.acorde is None:
-            return PropostaOut(sugestao=sugestao)
+            return PropostaOut(sugestao=sugestao, motivo_nao_salvar=sugestao.mensagem)
         if not sugestao.dados_suficientes:
-            return PropostaOut(sugestao=sugestao, sem_formulacao=MSG_SEM_FUNDAMENTO)
+            return PropostaOut(sugestao=sugestao, sem_formulacao=MSG_SEM_FUNDAMENTO,
+                               motivo_nao_salvar=MSG_SEM_FUNDAMENTO)
         formulacao = self.calcular_itens(
             FormulacaoPedidoIn(produto=pedido.produto, volume_ml=pedido.volume_ml,
                                concentracao_pct=pedido.concentracao_pct),
             [(i.essencia_id, i.peso) for i in sugestao.acorde.itens],
         )
-        return PropostaOut(sugestao=sugestao, formulacao=formulacao)
+        # Salvar como criação cria o acorde da versão 1, que exige 2 ou mais essências.
+        n = len(sugestao.acorde.itens)
+        pode = formulacao.valido and n >= 2
+        motivo = None
+        if not formulacao.valido:
+            motivo = " ".join(formulacao.erros)
+        elif n < 2:
+            motivo = ("Para salvar como criação são necessárias pelo menos 2 essências com Família e Percepção. "
+                      "A fórmula acima já pode ser usada como referência.")
+        return PropostaOut(sugestao=sugestao, formulacao=formulacao, pode_salvar=pode, motivo_nao_salvar=motivo)
